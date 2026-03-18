@@ -1,0 +1,34 @@
+﻿version: '3.8'
+
+services:
+  ai:
+    build: ./ai
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./ai:/app
+
+  backend:
+    build: ./backend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: carevision
+      POSTGRES_PASSWORD: carevision1234
+      POSTGRES_DB: carevision_db
+    ports:
+      - "5432:5432"
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
