@@ -1,0 +1,123 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 보호자 / 관리자 계정
+model User {
+  id            Int            @id @default(autoincrement())
+  email         String         @unique
+  password      String
+  name          String
+  phone         String?
+  role          Role           @default(CAREGIVER)
+  fcmToken      String?
+  createdAt     DateTime       @default(now())
+  patients      Patient[]
+  notifications Notification[]
+}
+
+enum Role {
+  ADMIN
+  CAREGIVER
+}
+
+// 독거노인 환자
+model Patient {
+  id              Int              @id @default(autoincrement())
+  name            String
+  age             Int?
+  address         String?
+  phone           String?
+  userId          Int
+  user            User             @relation(fields: [userId], references: [id])
+  createdAt       DateTime         @default(now())
+  cameras         Camera[]
+  medications     Medication[]
+  medicationLogs  MedicationLog[]
+  detectionLogs   DetectionLog[]
+  notifications   Notification[]
+}
+
+// 설치된 카메라
+model Camera {
+  id            Int            @id @default(autoincrement())
+  patientId     Int
+  patient       Patient        @relation(fields: [patientId], references: [id])
+  location      String         // 거실, 침실, 주방 등
+  streamUrl     String?
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  detectionLogs DetectionLog[]
+}
+
+// 복약 일정
+model Medication {
+  id             Int             @id @default(autoincrement())
+  patientId      Int
+  patient        Patient         @relation(fields: [patientId], references: [id])
+  name           String          // 약 이름
+  dosage         String?         // 용량 (예: 1정)
+  scheduleTime   String          // 복약 시간 (예: 08:00)
+  days           String          // 복약 요일 (예: MON,TUE,WED,THU,FRI)
+  isActive       Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  medicationLogs MedicationLog[]
+}
+
+// 실제 복약 기록
+model MedicationLog {
+  id           Int              @id @default(autoincrement())
+  medicationId Int
+  medication   Medication       @relation(fields: [medicationId], references: [id])
+  patientId    Int
+  patient      Patient          @relation(fields: [patientId], references: [id])
+  status       MedicationStatus @default(UNCONFIRMED)
+  takenAt      DateTime?
+  createdAt    DateTime         @default(now())
+}
+
+enum MedicationStatus {
+  TAKEN         // 복약 완료
+  MISSED        // 미복약
+  UNCONFIRMED   // 미확인
+}
+
+// AI 감지 이력
+model DetectionLog {
+  id            Int               @id @default(autoincrement())
+  patientId     Int
+  patient       Patient           @relation(fields: [patientId], references: [id])
+  cameraId      Int?
+  camera        Camera?           @relation(fields: [cameraId], references: [id])
+  type          DetectionType
+  confidence    Float
+  imageUrl      String?
+  detectedAt    DateTime          @default(now())
+  notifications Notification[]
+}
+
+enum DetectionType {
+  FALL        // 낙상
+  MEDICATION  // 복약
+  NORMAL      // 정상
+}
+
+// 알림 발송 기록
+model Notification {
+  id             Int           @id @default(autoincrement())
+  userId         Int
+  user           User          @relation(fields: [userId], references: [id])
+  patientId      Int
+  patient        Patient       @relation(fields: [patientId], references: [id])
+  detectionLogId Int?
+  detectionLog   DetectionLog? @relation(fields: [detectionLogId], references: [id])
+  type           DetectionType
+  message        String
+  isRead         Boolean       @default(false)
+  sentAt         DateTime      @default(now())
+}
