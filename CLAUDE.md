@@ -223,13 +223,43 @@ cd backend && npx prisma migrate dev
 - [x] 백엔드 기본 구조 (Express · Prisma · JWT)
 - [x] DB 스키마 설계 완료
 - [x] 프론트엔드 기본 구조
+- [x] 낙상 감지 파이프라인 (MediaPipe Pose — 연속 3프레임 판정)
+- [x] 복약 감지 파이프라인 MVP (사전학습 ONNX 모델 — capsules/tablets 감지)
+- [x] 실시간 카메라 MJPEG 스트리밍
+- [x] 백엔드 AI 서버 호출 클라이언트
+- [x] 복약 감지 테스트 페이지 (`GET /test/medication`)
 - [ ] PostgreSQL 설치 및 DB 마이그레이션
-- [ ] 낙상 감지 파이프라인 (MediaPipe)
-- [ ] 복약 감지 파이프라인 (YOLOv8 파인튜닝)
-- [ ] 프론트 페이지 개발
+- [ ] 복약 감지 모델 파인튜닝 (데스크탑에서 진행 예정)
+- [ ] 프론트 페이지 개발 (보호자 앱 UI)
 - [ ] Firebase FCM 연동
 - [ ] 통합 테스트
 
 ---
 
-*마지막 업데이트: 2026-03-20*
+## 모델 현황
+
+| 모델 | 파일 | 클래스 | 비고 |
+|------|------|--------|------|
+| 복약 감지 (ONNX) | `ai/models/pills_detection.onnx` | capsules, tablets | seblful/pills-detection, mAP 91.7% |
+| 낙상 감지 | MediaPipe Pose (내장) | — | 별도 모델 파일 없음 |
+| 복약 감지 (파인튜닝) | `ai/models/medication.pt` | — | 미완성 (데스크탑 학습 예정) |
+
+---
+
+## 테스트
+
+```bash
+# 복약 감지 — 사진 파일로 테스트
+cd ai
+.\venv\Scripts\python.exe test_medication.py ..\test\medicineDetectionTestPic.jpg
+
+# 복약 감지 — 브라우저 UI 테스트 (서버 실행 후)
+# http://localhost:8000/test/medication
+
+# 웹캠 실시간 테스트
+.\venv\Scripts\python.exe test_medication.py --webcam
+```
+
+---
+
+*마지막 업데이트: 2026-03-24*
