@@ -83,26 +83,39 @@ carevision/
 
 ---
 
+## 사용자 구성
+
+| 역할 | 디바이스 | 설명 |
+|------|---------|------|
+| 피보호자 | 카메라 (가정 내 설치) | 약 복용 및 위험 상황을 카메라로 감지 |
+| 보호자 | 모바일 앱 (Capacitor) | 약 일정 관리, 알림 수신, 카메라 스트림 확인 |
+
+---
+
 ## 핵심 기능
 
-### 1. 낙상 감지
-- MediaPipe Pose로 관절 좌표 추출
-- 머리(Nose) Y좌표 > 골반(Hip) Y좌표 → 낙상 판정
-- 연속 3프레임 유지 시 확정 (오탐지 방지)
-- 판정 결과: 정상 / 주의 / 응급 의심 / 응급 확정
-- 응급 확정 시 보호자에게 FCM 즉시 알림
+### 1. 복약 스케줄 관리 (보호자 앱)
+- 보호자가 앱에서 피보호자의 복약 일정 등록 (예: 아침 8시 혈압약, 점심 12시 당뇨약 등)
+- 스케줄 화면에 시간대별 복약 목록 표시
+- 복약 감지 시 → 해당 항목에 ✅ 체크 표시
+- 복약 미감지 시 → 해당 항목에 ❌ 표시 + 보호자 앱 푸시 알림
 
-### 2. 복약 감지
+### 2. 복약 감지 (AI 카메라)
 - YOLOv8으로 약통 / 알약 객체 감지
 - 손-입 이동 동작 분석 (연속 프레임 기반)
-- 복약 스케줄과 비교하여 복약 여부 판정
-- 판정 결과: 복약 완료 / 복약 의심 / 복약 미확인 / 복약 누락
-- 복약 누락 시 보호자에게 FCM 알림
+- 스케줄 시간 기준으로 복약 여부 판정
+- 판정 결과: 복약 완료 / 복약 의심 / 복약 누락
 
-### 3. 보호자 모니터링
-- 실시간 카메라 스트림 + 감지 결과 오버레이
-- 복약 이력 / 감지 이력 조회
-- 푸시 알림 수신 및 읽음 처리
+### 3. 위험 상황 감지 (AI 카메라)
+- MediaPipe Pose로 관절 좌표 추출
+- 머리(Nose) Y좌표 > 골반(Hip) Y좌표 → 낙상 판정
+- 연속 3프레임 유지 시 위급 확정 (오탐지 방지)
+- 위급 확정 시 → 보호자 앱 즉시 푸시 알림
+
+### 4. 실시간 카메라 스트리밍 (보호자 앱)
+- 위험 상황 알림 수신 시 보호자 앱에서 해당 카메라 화면 실시간 확인 가능
+- 스트리밍 방식: WebRTC 또는 MJPEG over HTTP
+- 평상시에는 스트림 비활성, 위급 알림 시 자동 활성화 (프라이버시 보호)
 
 ---
 
@@ -124,19 +137,32 @@ User (보호자)
 
 ### AI 서버
 ```
-POST /detect/fall         # 낙상 감지
-POST /detect/medication   # 복약 감지
-GET  /health              # 서버 상태 확인
+POST /detect/fall              # 낙상 감지
+POST /detect/medication        # 복약 감지
+GET  /health                   # 서버 상태 확인
+GET  /stream/:cameraId         # 카메라 실시간 스트리밍 (MJPEG)
 ```
 
 ### 백엔드
 ```
 POST /api/auth/register
 POST /api/auth/login
+
 GET  /api/patients
 POST /api/patients
-GET  /api/detections/:patientId
-POST /api/detections
+
+GET  /api/medications/:patientId           # 복약 스케줄 목록
+POST /api/medications                      # 복약 스케줄 등록
+PATCH /api/medications/:id                 # 스케줄 수정
+DELETE /api/medications/:id               # 스케줄 삭제
+
+GET  /api/medications/logs/:patientId      # 복약 기록 (체크/X 이력)
+
+GET  /api/detections/:patientId            # 위험 감지 이력
+POST /api/detections                       # 감지 결과 저장
+
+GET  /api/notifications                    # 보호자 알림 목록
+PATCH /api/notifications/:id/read         # 알림 읽음 처리
 ```
 
 ---
@@ -183,9 +209,10 @@ cd backend && npx prisma migrate dev
 ## 개발 원칙
 
 1. **오탐지 최소화** — 단일 프레임이 아닌 연속 프레임 분석 필수
-2. **프라이버시 보호** — 영상은 최소 처리, 응급 시에만 클립 제공
+2. **프라이버시 보호** — 영상 스트리밍은 위급 상황 알림 시에만 활성화
 3. **골든타임 확보** — 감지 → 알림까지 지연 최소화
 4. **종합 점수 판정** — 단일 지표가 아닌 다중 지표 종합
+5. **모바일 우선** — 보호자 UI는 Capacitor 기반 앱 (기존 React 코드 재사용)
 
 ---
 
