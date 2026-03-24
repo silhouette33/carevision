@@ -1,11 +1,16 @@
-﻿from fastapi import FastAPI
+import sys
+import os
+
+# 현재 디렉토리를 경로에 추가 (모듈 import 해결)
+sys.path.insert(0, os.path.dirname(__file__))
+
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from detector import detector
+from api.routes import router
+from streaming.mjpeg import stream_router
 
 app = FastAPI(title="CareVision AI Server")
 
-# 프론트엔드(React)에서 요청 가능하도록 CORS 설정
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -13,24 +18,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 요청 형식 정의
-class ImageRequest(BaseModel):
-    image: str  # base64로 인코딩된 이미지
+# 라우터 등록
+app.include_router(router)
+app.include_router(stream_router)
 
+# 루트 경로 → 헬스 체크
 @app.get("/")
-def health_check():
+def root():
     return {"status": "ok", "message": "CareVision AI Server is running"}
-
-@app.post("/detect")
-def detect_objects(request: ImageRequest):
-    """
-    이미지를 받아서 물체 감지 결과 반환
-    - 입력: base64 인코딩된 이미지
-    - 출력: 감지된 물체 목록 (이름, 확신도, 위치)
-    """
-    detections = detector.detect_from_base64(request.image)
-    return {
-        "success": True,
-        "detections": detections,
-        "count": len(detections)
-    }
