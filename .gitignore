@@ -14,7 +14,11 @@ dist/
 # AI 모델 (용량 커서 제외)
 *.pt
 *.weights
+*.onnx
 ai/data/
+
+# Firebase 서비스 계정 키 (민감 정보)
+firebase-service-account.json
 
 # OS
 .DS_Store
