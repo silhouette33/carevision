@@ -19,21 +19,21 @@ const getPatient = async (req, res) => {
 };
 
 const createPatient = async (req, res) => {
-  const { name, age, cameraUrl } = req.body;
+  const { name, age, address, phone } = req.body;
   if (!name)
     return res.status(400).json({ message: '이름을 입력하세요.' });
 
   const patient = await prisma.patient.create({
-    data: { name, age, cameraUrl, userId: req.userId },
+    data: { name, age, address, phone, userId: req.userId },
   });
   res.status(201).json(patient);
 };
 
 const updatePatient = async (req, res) => {
-  const { name, age, cameraUrl } = req.body;
+  const { name, age, address, phone } = req.body;
   const patient = await prisma.patient.updateMany({
     where: { id: Number(req.params.id), userId: req.userId },
-    data: { name, age, cameraUrl },
+    data: { name, age, address, phone },
   });
   if (patient.count === 0)
     return res.status(404).json({ message: '환자를 찾을 수 없습니다.' });
