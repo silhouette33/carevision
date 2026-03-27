@@ -16,12 +16,20 @@ export default function NotificationsPage({ onBack }) {
     fetchNotifications();
   }, []);
 
+  const MOCK_NOTIFICATIONS = [
+    { id: 1, type: 'FALL', message: '김순자 어르신의 낙상이 감지되었습니다. 즉시 확인해주세요.', isRead: false, sentAt: new Date(Date.now() - 600000).toISOString(), patient: { name: '김순자' } },
+    { id: 2, type: 'MEDICATION', message: '이복순 어르신의 점심 복약(당뇨약)이 누락되었습니다.', isRead: false, sentAt: new Date(Date.now() - 3600000).toISOString(), patient: { name: '이복순' } },
+    { id: 3, type: 'MEDICATION', message: '김순자 어르신의 아침 복약(혈압약)이 완료되었습니다.', isRead: true, sentAt: new Date(Date.now() - 21600000).toISOString(), patient: { name: '김순자' } },
+    { id: 4, type: 'FALL', message: '박명수 어르신의 낙상 의심 동작이 감지되었습니다.', isRead: true, sentAt: new Date(Date.now() - 86400000).toISOString(), patient: { name: '박명수' } },
+  ];
+
   const fetchNotifications = async () => {
     try {
       const data = await api.getNotifications();
       setNotifications(data);
     } catch (err) {
-      setError(err.message);
+      // 목업 데이터로 대체 (API 미연결 시)
+      setNotifications(MOCK_NOTIFICATIONS);
     } finally {
       setLoading(false);
     }

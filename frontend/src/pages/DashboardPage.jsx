@@ -13,6 +13,12 @@ export default function DashboardPage({ user, onLogout, onSelectPatient, onGoNot
     fetchData();
   }, []);
 
+  const MOCK_PATIENTS = [
+    { id: 1, name: '김순자', age: 78, address: '서울 노원구 공릉동', phone: '010-1234-5678' },
+    { id: 2, name: '이복순', age: 82, address: '서울 도봉구 방학동', phone: '010-9876-5432' },
+    { id: 3, name: '박명수', age: 75, address: '경기 의정부시 금오동', phone: '010-5555-1234' },
+  ];
+
   const fetchData = async () => {
     try {
       const [patientsData, countData] = await Promise.all([
@@ -22,7 +28,9 @@ export default function DashboardPage({ user, onLogout, onSelectPatient, onGoNot
       setPatients(patientsData);
       setUnreadCount(countData.count);
     } catch (err) {
-      setError(err.message);
+      // 목업 데이터로 대체 (API 미연결 시)
+      setPatients(MOCK_PATIENTS);
+      setUnreadCount(3);
     } finally {
       setLoading(false);
     }

@@ -36,11 +36,22 @@ carevision/
 ├── ai/                            # AI 서버 (FastAPI :8000)
 │   ├── main.py                    # FastAPI 진입점
 │   ├── detector.py                # YOLOv8 객체 감지 클래스
+│   ├── test_medication.py         # 복약 감지 단독 테스트
+│   ├── yolov8n.pt                 # YOLOv8 기본 모델
+│   ├── api/
+│   │   └── routes.py              # FastAPI 라우터
 │   ├── pipelines/
 │   │   ├── fall_detector.py       # 낙상 감지 (MediaPipe Pose)
-│   │   └── medication_detector.py # 복약 감지 (YOLOv8)
-│   ├── models/                    # 모델 파일 (.pt)
-│   ├── api/                       # 추가 라우터
+│   │   └── medication_detector.py # 복약 감지 (ONNX + YOLOv8)
+│   ├── models/
+│   │   └── pills_detection.onnx   # 알약 감지 ONNX 모델
+│   ├── services/
+│   │   └── backend_client.py      # 백엔드 서버 호출 클라이언트
+│   ├── streaming/
+│   │   └── mjpeg.py               # MJPEG 스트리밍
+│   ├── training/
+│   │   ├── download_dataset.py    # 데이터셋 다운로드
+│   │   └── train_medication.py    # 모델 학습
 │   └── data/                      # 학습 데이터
 ├── backend/                       # 백엔드 서버 (Express :3000)
 │   ├── src/
@@ -48,11 +59,15 @@ carevision/
 │   │   ├── routes/
 │   │   │   ├── auth.js
 │   │   │   ├── patients.js
-│   │   │   └── detections.js
+│   │   │   ├── detections.js
+│   │   │   ├── medications.js     # 복약 스케줄 라우터
+│   │   │   └── notifications.js   # 알림 라우터
 │   │   ├── controllers/
 │   │   │   ├── authController.js
 │   │   │   ├── patientController.js
-│   │   │   └── detectionController.js
+│   │   │   ├── detectionController.js
+│   │   │   ├── medicationController.js   # 복약 스케줄/기록
+│   │   │   └── notificationController.js # 알림 CRUD
 │   │   ├── middleware/
 │   │   │   └── auth.js            # JWT 인증 미들웨어
 │   │   └── services/
@@ -60,14 +75,25 @@ carevision/
 │   │       └── fcm.js             # FCM 알림 발송
 │   └── prisma/
 │       └── schema.prisma          # DB 스키마
-└── frontend/                      # 프론트엔드 (React :5173)
-    ├── src/
-    │   ├── App.jsx
-    │   ├── main.jsx
-    │   ├── pages/
-    │   ├── components/
-    │   └── api/
-    └── index.html
+├── frontend/                      # 프론트엔드 (React :5173)
+│   ├── index.html
+│   ├── prototype.html             # UI 프로토타입 (정적 HTML)
+│   ├── vite.config.js
+│   └── src/
+│       ├── App.jsx                # 라우팅 + 로그인 상태 관리
+│       ├── main.jsx
+│       ├── api/
+│       │   └── client.js          # API 클라이언트 (목업 데이터 포함)
+│       └── pages/
+│           ├── LoginPage.jsx      # 로그인/회원가입
+│           ├── DashboardPage.jsx  # 대시보드 (환자 목록)
+│           ├── PatientDetailPage.jsx  # 환자 상세 (복약/감지)
+│           └── NotificationsPage.jsx  # 알림 목록
+├── test/                          # 테스트 이미지
+│   ├── medicineDetectionTestPic.jpg
+│   └── result_medicineDetectionTestPic.jpg
+└── docs/
+    └── test.md
 ```
 
 ---
@@ -137,10 +163,13 @@ User (보호자)
 
 ### AI 서버
 ```
-POST /detect/fall              # 낙상 감지
-POST /detect/medication        # 복약 감지
-GET  /health                   # 서버 상태 확인
-GET  /stream/:cameraId         # 카메라 실시간 스트리밍 (MJPEG)
+POST /detect/fall                  # 낙상 감지
+POST /detect/medication            # 복약 감지 (base64 스트림)
+POST /detect/medication/upload     # 복약 감지 (이미지 업로드)
+POST /detect                       # 일반 객체 감지
+GET  /test/medication              # 복약 감지 테스트 UI (HTML)
+GET  /health                       # 서버 상태 확인
+GET  /stream/:cameraId             # 카메라 실시간 스트리밍 (MJPEG)
 ```
 
 ### 백엔드
@@ -148,21 +177,26 @@ GET  /stream/:cameraId         # 카메라 실시간 스트리밍 (MJPEG)
 POST /api/auth/register
 POST /api/auth/login
 
-GET  /api/patients
-POST /api/patients
+GET    /api/patients               # 환자 목록
+GET    /api/patients/:id           # 환자 상세
+POST   /api/patients               # 환자 등록
+PUT    /api/patients/:id           # 환자 수정
+DELETE /api/patients/:id           # 환자 삭제
 
-GET  /api/medications/:patientId           # 복약 스케줄 목록
-POST /api/medications                      # 복약 스케줄 등록
-PATCH /api/medications/:id                 # 스케줄 수정
-DELETE /api/medications/:id               # 스케줄 삭제
+GET    /api/medications/:patientId # 복약 스케줄 목록
+POST   /api/medications            # 복약 스케줄 등록
+PATCH  /api/medications/:id        # 스케줄 수정
+DELETE /api/medications/:id        # 스케줄 삭제
+GET    /api/medications/logs/:patientId  # 복약 기록
+POST   /api/medications/logs       # 복약 기록 생성
 
-GET  /api/medications/logs/:patientId      # 복약 기록 (체크/X 이력)
+GET    /api/detections             # 감지 이력 조회
+POST   /api/detections             # 감지 결과 저장
 
-GET  /api/detections/:patientId            # 위험 감지 이력
-POST /api/detections                       # 감지 결과 저장
-
-GET  /api/notifications                    # 보호자 알림 목록
-PATCH /api/notifications/:id/read         # 알림 읽음 처리
+GET    /api/notifications          # 알림 목록
+GET    /api/notifications/unread-count   # 읽지 않은 알림 수
+PATCH  /api/notifications/:id/read      # 알림 읽음 처리
+PATCH  /api/notifications/read-all      # 전체 읽음 처리
 ```
 
 ---
@@ -216,23 +250,55 @@ cd backend && npx prisma migrate dev
 
 ---
 
+## 팀 구성 (6명)
+
+| 역할 | 인원 | 담당 |
+|------|------|------|
+| 팀장 + AI + 통합 | 1명 | 전체 구조 관리, AI 서버, 라즈베리파이, 통합 테스트 |
+| 백엔드 | 1명 | PostgreSQL 연결, FCM 연동, API 완성 |
+| 데이터처리 (AI) | 1명 | 복약/낙상 감지 정확도 개선, 학습 데이터 수집 |
+| 프론트엔드 | 2명 | 디자인, UI/UX, 페이지 개선, API 연동 |
+| 문서/QA | 1명 | 발표 자료, 보고서, 테스트 케이스 |
+
+---
+
+## Git 브랜치 전략
+
+```
+main              → 항상 동작하는 최종 코드
+develop           → 통합 테스트용
+feature/ai        → AI 파이프라인 개발
+feature/backend   → 백엔드 개발
+feature/frontend  → 프론트엔드 개발
+```
+
+---
+
 ## 개발 현황
 
+### 완료
 - [x] 프로젝트 구조 설계 및 GitHub 세팅
-- [x] AI 서버 기본 구축 (YOLOv8 객체 감지)
+- [x] AI 서버 기본 구축 (FastAPI + YOLOv8)
+- [x] 낙상 감지 파이프라인 (MediaPipe Pose — 연속 3프레임 판정)
+- [x] 복약 감지 파이프라인 MVP (ONNX 모델 — capsules/tablets 감지)
+- [x] 복약 감지 테스트 페이지 (`GET /test/medication`)
+- [x] 실시간 카메라 MJPEG 스트리밍
 - [x] 백엔드 기본 구조 (Express · Prisma · JWT)
 - [x] DB 스키마 설계 완료
-- [x] 프론트엔드 기본 구조
-- [x] 낙상 감지 파이프라인 (MediaPipe Pose — 연속 3프레임 판정)
-- [x] 복약 감지 파이프라인 MVP (사전학습 ONNX 모델 — capsules/tablets 감지)
-- [x] 실시간 카메라 MJPEG 스트리밍
+- [x] 백엔드 라우터/컨트롤러 전체 구현 (auth, patients, medications, detections, notifications)
 - [x] 백엔드 AI 서버 호출 클라이언트
-- [x] 복약 감지 테스트 페이지 (`GET /test/medication`)
+- [x] 프론트엔드 페이지 4종 완성 (로그인, 대시보드, 환자 상세, 알림)
+- [x] 프론트엔드 API 클라이언트 + 목업 데이터 (DB 없이 화면 테스트 가능)
+- [x] Git 브랜치 전략 수립 (main, develop, feature/*)
+
+### 미완료
 - [ ] PostgreSQL 설치 및 DB 마이그레이션
 - [ ] 복약 감지 모델 파인튜닝 (데스크탑에서 진행 예정)
-- [ ] 프론트 페이지 개발 (보호자 앱 UI)
+- [ ] 프론트엔드 디자인 개선 (UI/UX)
 - [ ] Firebase FCM 연동
+- [ ] 라즈베리파이 설치 및 카메라 연결
 - [ ] 통합 테스트
+- [ ] Docker 배포
 
 ---
 
@@ -262,4 +328,4 @@ cd ai
 
 ---
 
-*마지막 업데이트: 2026-03-24*
+*마지막 업데이트: 2026-03-27*
