@@ -165,12 +165,45 @@ carevision/
 
 | 모델 | 파일 | 감지 대상 | 상태 |
 |------|------|----------|------|
+| 복약 감지 (파인튜닝 v1) | `ai/models/medication.pt` | 한국 약 41종 | ✅ 학습 완료 |
 | 복약 감지 (사전학습) | `ai/models/pills_detection.onnx` | capsules, tablets | ⚠️ 파일 없음 (별도 다운로드) |
-| 복약 감지 (파인튜닝) | `ai/models/medication.pt` | — | ❌ 미학습 |
 | 낙상 감지 | MediaPipe Pose (내장) | 사람 관절 | ✅ 코드 완성 |
 
 > **pills_detection.onnx 다운로드**: [seblful/pills-detection](https://huggingface.co/seblful/pills-detection) (mAP 91.7%)
 > 다운로드 후 `ai/models/pills_detection.onnx` 경로에 저장
+
+---
+
+## 복약 감지 모델 학습 결과 (v1 — 2026-04-02)
+
+### 학습 환경
+| 항목 | 내용 |
+|------|------|
+| 베이스 모델 | YOLOv8n (pretrained COCO) |
+| 학습 데이터 | 한국 약 41종 / train 1,499장 / val 880장 |
+| GPU | NVIDIA RTX 4070 Ti |
+| 학습 시간 | 약 10분 (40 에포크, EarlyStopping) |
+| 배치 크기 | 32 |
+
+### 정확도 결과
+| 지표 | 수치 | 설명 |
+|------|------|------|
+| **mAP50** | **0.340** | IoU 50% 기준 평균 정밀도 |
+| **mAP50-95** | **0.328** | IoU 50~95% 엄격한 기준 |
+| Precision | 0.311 | 약이라고 예측한 것 중 맞은 비율 |
+| Recall | 0.846 | 실제 약 중 감지해낸 비율 |
+
+### 학습 그래프
+![results](ai/training/runs/medication/results.png)
+
+### 혼동 행렬
+![confusion_matrix](ai/training/runs/medication/confusion_matrix_normalized.png)
+
+### 한계 및 개선 방향
+- **mAP50 0.34** — 데이터 부족으로 낮은 정확도 (클래스당 평균 36장)
+- 데이터 1장짜리 클래스 존재 (울트라셋이알서방정 등 12개 클래스 10장 미만)
+- **클래스당 100장 이상** 확보 시 mAP50 0.7+ 기대
+- 추가 데이터 수집 후 재학습 예정
 
 ---
 
