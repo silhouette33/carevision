@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -11,11 +11,22 @@ node_modules/
 dist/
 .env
 
-# AI 모델 (용량 커서 제외)
-*.pt
+# AI - 베이스 모델 (자동 다운로드)
+yolov8n.pt
+yolov8s.pt
+yolov8m.pt
 *.weights
-*.onnx
+
+# AI - 학습 데이터 (용량 커서 제외, 별도 공유)
 ai/data/
+medication_yolo/
+
+# AI - ONNX 모델 (별도 공유)
+*.onnx
+
+# AI - 학습 중간 결과 (last.pt, 배치 이미지)
+ai/training/runs/**/weights/last.pt
+ai/training/runs/**/*_batch*.jpg
 
 # Firebase 서비스 계정 키 (민감 정보)
 firebase-service-account.json

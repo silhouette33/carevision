@@ -77,14 +77,17 @@ def train():
 
     results = model.train(
         data=DATA_YAML,
-        epochs=50,           # 에포크 수 (데이터 적으면 100으로 올리기)
+        epochs=50,           # 에포크 수
         imgsz=640,           # 이미지 크기
-        batch=16,            # 배치 크기 (GPU 메모리에 따라 조절)
+        batch=32,            # RTX 4070 Ti 12GB 기준 최적값
         patience=10,         # 조기 종료 patience
         save=True,
         project=os.path.join(BASE_DIR, "training", "runs"),
         name="medication",
         exist_ok=True,
+        device=0,            # GPU 0번 사용 (RTX 4070 Ti)
+        workers=4,           # 데이터 로딩 병렬 처리
+        amp=False,           # AMP 비활성화 (RTX 40시리즈 호환 이슈)
     )
 
     # 최적 모델 복사
