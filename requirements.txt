@@ -1,41 +1,32 @@
-# CareVision AI 서버 의존성
-# 설치: pip install -r requirements.txt
-#
-# GPU 환경 (데스크탑) 권장:
-#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-#   pip install -r requirements.txt
-#
-# CPU 환경 (노트북):
-#   pip install -r requirements.txt
+# CareVision AI Server Dependencies
 
-# --- 웹 서버 ---
+# --- Web Server ---
 fastapi==0.135.1
 uvicorn==0.42.0
-python-multipart          # 파일 업로드 지원
+python-multipart
 pydantic==2.12.5
 
-# --- AI / 딥러닝 ---
+# --- AI / Deep Learning ---
 torch==2.10.0
 torchvision==0.25.0
-ultralytics==8.4.23       # YOLOv8
+ultralytics==8.4.23
 
-# --- ONNX (사전학습 복약 감지 모델) ---
+# --- ONNX ---
 onnx==1.20.1
-onnxruntime==1.24.4       # CPU 추론
-# onnxruntime-gpu==1.24.4 # GPU 추론 (데스크탑에서 교체)
+onnxruntime==1.23.2
 
-# --- 컴퓨터 비전 ---
+# --- Computer Vision ---
 opencv-python==4.13.0.92
-mediapipe==0.10.14        # 낙상 감지 (Pose estimation)
+mediapipe==0.10.14
 Pillow==12.1.1
 
-# --- 유틸리티 ---
-numpy==2.4.3
+# --- Utilities ---
+numpy==2.2.6
 requests==2.32.5
 PyYAML==6.0.3
 python-dotenv==1.2.2
 psutil==7.2.2
 
-# --- 시각화 / 학습 (파인튜닝 시 필요) ---
+# --- Visualization / Training ---
 matplotlib==3.10.8
-scipy==1.17.1
+scipy==1.15.3
