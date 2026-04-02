@@ -167,7 +167,7 @@ carevision/
 |------|------|----------|------|
 | 복약 감지 (파인튜닝 v1) | `ai/models/medication.pt` | 한국 약 41종 | ✅ 학습 완료 |
 | 복약 감지 (사전학습) | `ai/models/pills_detection.onnx` | capsules, tablets | ⚠️ 파일 없음 (별도 다운로드) |
-| 낙상 감지 | MediaPipe Pose (내장) | 사람 관절 | ✅ 코드 완성 |
+| 낙상 감지 | MediaPipe Pose (내장) | 사람 관절 |  |
 
 > **pills_detection.onnx 다운로드**: [seblful/pills-detection](https://huggingface.co/seblful/pills-detection) (mAP 91.7%)
 > 다운로드 후 `ai/models/pills_detection.onnx` 경로에 저장

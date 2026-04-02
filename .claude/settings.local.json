@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx prisma:*)",
+      "Bash(git commit -m \"chore: 데스크탑 환경 세팅 및 개발 현황 최신화:*)",
+      "Bash(git push:*)",
+      "Bash(git fetch:*)",
+      "Bash(git branch:*)",
+      "Bash(/c/carevision-main/ai/venv/Scripts/python.exe -c \":*)",
+      "Bash(/c/carevision-main/ai/venv/Scripts/python.exe -c \"import torch; print\\(''GPU:'', torch.cuda.is_available\\(\\)\\); print\\(''GPU 이름:'', torch.cuda.get_device_name\\(0\\) if torch.cuda.is_available\\(\\) else ''CPU만 사용''\\)\")",
+      "Bash(taskkill /F /IM python.exe)",
+      "Bash(taskkill //F //IM python.exe)",
+      "Bash(where conda:*)",
+      "Bash(conda --version)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"feat\\(ai\\): 복약 감지 모델 학습 완료 및 결과 저장:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}
