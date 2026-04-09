@@ -1,26 +1,16 @@
 import { useState, useEffect } from 'react';
 import { api } from '../api/client';
 import logo from '../assets/CareVision.png';
-import { colors, layout, button } from '../styles/common';
 
-export default function DashboardPage({
-                                          user,
-                                          onLogout,
-                                          onSelectPatient,
-                                          onGoNotifications,
-                                          onEmergency,
-                                      }) {
+export default function DashboardPage({ user, onSelectPatient, onEmergency, onPatientsLoaded }) {
     const [patients, setPatients] = useState([]);
     const [medSummary, setMedSummary] = useState({});
     const [showForm, setShowForm] = useState(false);
-    const [activeTab, setActiveTab] = useState('home');
     const [newPatient, setNewPatient] = useState({
         name: '', age: '', address: '', phone: '', cameraId: '',
     });
 
-    useEffect(() => {
-        fetchPatients();
-    }, []);
+    useEffect(() => { fetchPatients(); }, []);
 
     const fetchPatients = async () => {
         const data = await api.getPatients();
@@ -34,6 +24,7 @@ export default function DashboardPage({
         ];
         const all = [...data, ...extra];
         setPatients(all);
+        onPatientsLoaded?.(all);
         fetchMedSummaries(all);
     };
 
@@ -55,13 +46,9 @@ export default function DashboardPage({
                 const total = meds.length;
                 const taken = logs.filter(l => l.status === 'TAKEN').length;
                 const missed = logs.filter(l => l.status === 'MISSED').length;
-                if (total > 0) {
-                    summaries[p.id] = { total, taken, missed };
-                } else if (EXTRA_MED_MOCK[p.id]) {
-                    summaries[p.id] = EXTRA_MED_MOCK[p.id];
-                } else {
-                    summaries[p.id] = { total: 0, taken: 0, missed: 0 };
-                }
+                summaries[p.id] = total > 0
+                    ? { total, taken, missed }
+                    : (EXTRA_MED_MOCK[p.id] || { total: 0, taken: 0, missed: 0 });
             } catch {
                 summaries[p.id] = EXTRA_MED_MOCK[p.id] || { total: 0, taken: 0, missed: 0 };
             }
@@ -71,14 +58,17 @@ export default function DashboardPage({
 
     const handleAddPatient = (e) => {
         e.preventDefault();
-        const newData = { id: Date.now(), ...newPatient };
-        setPatients(prev => [newData, ...prev]);
+        const all = [{ id: Date.now(), ...newPatient }, ...patients];
+        setPatients(all);
+        onPatientsLoaded?.(all);
         setNewPatient({ name: '', age: '', address: '', phone: '', cameraId: '' });
         setShowForm(false);
     };
 
     const handleDelete = (id) => {
-        setPatients(prev => prev.filter(p => p.id !== id));
+        const all = patients.filter(p => p.id !== id);
+        setPatients(all);
+        onPatientsLoaded?.(all);
     };
 
     const getMedStatus = (id) => {
@@ -88,216 +78,98 @@ export default function DashboardPage({
     };
 
     return (
-        <div style={styles.pageWrapper}>
-
-            <div style={styles.scrollArea}>
+        <div className="min-h-screen bg-slate-100 max-w-[480px] mx-auto font-sans">
+            <div className="p-3">
 
                 {/* 헤더 */}
-                <div style={styles.header}>
-                    <div style={styles.logo}>
-                        <img src={logo} alt="logo" style={styles.logoImg} />
-                        <span style={styles.logoText}>CareVision</span>
+                <div className="flex justify-between items-center mb-2.5">
+                    <div className="flex items-center gap-1.5">
+                        <img src={logo} alt="logo" className="h-7" />
+                        <span className="font-bold text-blue-600 text-sm">CareVision</span>
                     </div>
-                    <button style={styles.emergencyBtn}
-                            onClick={() => { if (patients.length > 0) onEmergency(patients[0]); }}>
+                    <button
+                        className="bg-red-600 text-white border-none rounded-lg px-2.5 py-1 font-semibold cursor-pointer text-xs"
+                        onClick={() => patients.length > 0 && onEmergency(patients[0])}
+                    >
                         🚨 긴급
                     </button>
                 </div>
 
                 {/* 타이틀 + 추가 버튼 */}
-                <div style={styles.topBar}>
-                    <span style={styles.title}>환자 목록</span>
-                    <button style={styles.addBtn} onClick={() => setShowForm(!showForm)}>
+                <div className="flex justify-between items-center mb-2.5">
+                    <span className="text-sm font-bold text-gray-900">환자 목록</span>
+                    <button
+                        className="px-3 py-1 bg-blue-600 text-white border-none rounded-md cursor-pointer text-xs font-semibold"
+                        onClick={() => setShowForm(!showForm)}
+                    >
                         + 추가
                     </button>
                 </div>
 
                 {/* 추가 폼 */}
                 {showForm && (
-                    <div style={styles.formCard}>
-                        <h3 style={styles.formTitle}>환자 추가</h3>
-                        <form onSubmit={handleAddPatient} style={styles.form}>
-                            <input placeholder="이름" value={newPatient.name}
-                                   onChange={e => setNewPatient({ ...newPatient, name: e.target.value })}
-                                   style={styles.input} required />
-                            <input placeholder="나이" type="number" value={newPatient.age}
-                                   onChange={e => setNewPatient({ ...newPatient, age: e.target.value })}
-                                   style={styles.input} />
-                            <input placeholder="주소" value={newPatient.address}
-                                   onChange={e => setNewPatient({ ...newPatient, address: e.target.value })}
-                                   style={styles.input} />
-                            <input placeholder="전화번호" value={newPatient.phone}
-                                   onChange={e => setNewPatient({ ...newPatient, phone: e.target.value })}
-                                   style={styles.input} />
-                            <input placeholder="카메라 ID" value={newPatient.cameraId}
-                                   onChange={e => setNewPatient({ ...newPatient, cameraId: e.target.value })}
-                                   style={styles.input} />
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                                <button style={{ ...button.primary, flex: 1 }} type="submit">추가</button>
-                                <button type="button" style={styles.cancelBtn}
-                                        onClick={() => setShowForm(false)}>취소</button>
+                    <div className="bg-white p-3.5 rounded-xl mb-2.5 shadow-md">
+                        <h3 className="text-sm font-bold mb-2.5">환자 추가</h3>
+                        <form onSubmit={handleAddPatient} className="flex flex-col gap-2">
+                            <input className="px-3 py-2 rounded-lg border border-gray-300 text-sm outline-none" placeholder="이름" value={newPatient.name} onChange={e => setNewPatient({ ...newPatient, name: e.target.value })} required />
+                            <input className="px-3 py-2 rounded-lg border border-gray-300 text-sm outline-none" placeholder="나이" type="number" value={newPatient.age} onChange={e => setNewPatient({ ...newPatient, age: e.target.value })} />
+                            <input className="px-3 py-2 rounded-lg border border-gray-300 text-sm outline-none" placeholder="주소" value={newPatient.address} onChange={e => setNewPatient({ ...newPatient, address: e.target.value })} />
+                            <input className="px-3 py-2 rounded-lg border border-gray-300 text-sm outline-none" placeholder="전화번호" value={newPatient.phone} onChange={e => setNewPatient({ ...newPatient, phone: e.target.value })} />
+                            <input className="px-3 py-2 rounded-lg border border-gray-300 text-sm outline-none" placeholder="카메라 ID" value={newPatient.cameraId} onChange={e => setNewPatient({ ...newPatient, cameraId: e.target.value })} />
+                            <div className="flex gap-2">
+                                <button className="flex-1 py-2 bg-blue-600 text-white border-none rounded-lg cursor-pointer font-semibold text-sm" type="submit">추가</button>
+                                <button className="flex-1 py-2 bg-gray-100 border-none rounded-lg cursor-pointer font-semibold text-sm" type="button" onClick={() => setShowForm(false)}>취소</button>
                             </div>
                         </form>
                     </div>
                 )}
 
                 {/* 환자 카드 그리드 */}
-                <div style={styles.grid}>
+                <div className="grid grid-cols-2 gap-2.5">
                     {patients.map(p => {
                         const med = getMedStatus(p.id);
+                        const takenPct = med && med.total > 0 ? (med.taken / med.total) * 100 : 0;
                         return (
-                            <div key={p.id} style={styles.card}>
-                                <div style={styles.avatar}>{p.name?.[0]}</div>
-                                <h3 style={styles.patientName}>{p.name}</h3>
-                                <p style={styles.patientInfo}>{p.age && `${p.age}세`}</p>
-                                <p style={styles.patientInfo}>{p.address}</p>
+                            <div key={p.id} className="bg-white rounded-xl p-3 shadow-sm text-center flex flex-col gap-0.5">
+                                <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center mx-auto mb-1 text-base font-bold">
+                                    {p.name?.[0]}
+                                </div>
+                                <h3 className="text-sm font-bold text-gray-900 m-0">{p.name}</h3>
+                                <p className="text-[10px] text-gray-500 m-0">{p.age && `${p.age}세`}</p>
+                                <p className="text-[10px] text-gray-500 m-0">{p.address}</p>
 
                                 {med ? (
-                                    <div style={styles.medSummary}>
-                                        <div style={styles.medSummaryTitle}>💊 오늘 복약</div>
-                                        <div style={styles.medBadgeRow}>
-                                            <div style={{ ...styles.medBadge, background: '#dcfce7', color: '#16a34a' }}>✅ {med.taken}</div>
-                                            <div style={{ ...styles.medBadge, background: '#fee2e2', color: '#dc2626' }}>❌ {med.missed}</div>
-                                            <div style={{ ...styles.medBadge, background: '#fef3c7', color: '#d97706' }}>⏳ {med.unconfirmed}</div>
+                                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-1.5 my-1">
+                                        <div className="text-[10px] font-semibold text-gray-700 mb-1">💊 오늘 복약</div>
+                                        <div className="flex gap-0.5 justify-center mb-1">
+                                            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">✅ {med.taken}</span>
+                                            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">❌ {med.missed}</span>
+                                            <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-600">⏳ {med.unconfirmed}</span>
                                         </div>
-                                        <div style={styles.progressBar}>
-                                            <div style={{
-                                                ...styles.progressFill,
-                                                width: `${med.total > 0 ? (med.taken / med.total) * 100 : 0}%`,
-                                                background: med.missed > 0 ? '#f87171' : '#4ade80',
-                                            }} />
+                                        <div className="h-1 bg-gray-200 rounded-full overflow-hidden mb-0.5">
+                                            <div
+                                                className="h-full rounded-full transition-all duration-300"
+                                                style={{
+                                                    width: `${takenPct}%`,
+                                                    background: med.missed > 0 ? '#f87171' : '#4ade80',
+                                                }}
+                                            />
                                         </div>
-                                        <div style={styles.progressText}>{med.taken}/{med.total} 완료</div>
+                                        <div className="text-[9px] text-gray-500">{med.taken}/{med.total} 완료</div>
                                     </div>
                                 ) : (
-                                    <div style={styles.medEmpty}>💊 정보 없음</div>
+                                    <div className="text-[10px] text-gray-400 bg-gray-50 rounded-md p-1.5 my-1">💊 정보 없음</div>
                                 )}
 
-                                <div style={styles.cardButtons}>
-                                    <button style={styles.detailBtn} onClick={() => onSelectPatient(p)}>상세</button>
-                                    <button style={styles.deleteBtn} onClick={() => handleDelete(p.id)}>삭제</button>
+                                <div className="flex gap-1.5 mt-1">
+                                    <button className="flex-1 bg-blue-50 text-blue-600 border border-blue-200 rounded-md py-1 cursor-pointer text-[11px]" onClick={() => onSelectPatient(p)}>상세</button>
+                                    <button className="flex-1 bg-white text-red-500 border border-red-200 rounded-md py-1 cursor-pointer text-[11px]" onClick={() => handleDelete(p.id)}>삭제</button>
                                 </div>
                             </div>
                         );
                     })}
                 </div>
-
-                <div style={{ height: '72px' }} />
-            </div>
-
-            {/* 하단 네비게이션 바 */}
-            <div style={styles.bottomNav}>
-                <button style={styles.navBtn} onClick={() => setActiveTab('home')}>
-                    <span style={styles.navIcon}>🏠</span>
-                    <span style={{ ...styles.navLabel, color: activeTab === 'home' ? '#2563eb' : '#6b7280' }}>홈</span>
-                </button>
-                <button style={styles.navBtn} onClick={() => { setActiveTab('notification'); onGoNotifications(); }}>
-                    <span style={styles.navIcon}>🔔</span>
-                    <span style={{ ...styles.navLabel, color: activeTab === 'notification' ? '#2563eb' : '#6b7280' }}>알림</span>
-                </button>
-                <button style={styles.navBtn} onClick={() => { setActiveTab('emergency'); if (patients.length > 0) onEmergency(patients[0]); }}>
-                    <span style={styles.navIcon}>🚨</span>
-                    <span style={{ ...styles.navLabel, color: activeTab === 'emergency' ? '#2563eb' : '#6b7280' }}>긴급</span>
-                </button>
-                <button style={styles.navBtn} onClick={() => { setActiveTab('mypage'); onLogout(); }}>
-                    <span style={styles.navIcon}>👤</span>
-                    <span style={{ ...styles.navLabel, color: activeTab === 'mypage' ? '#2563eb' : '#6b7280' }}>마이</span>
-                </button>
             </div>
         </div>
     );
 }
-
-const styles = {
-    pageWrapper: {
-        minHeight: '100vh',
-        background: '#f1f5f9',
-        maxWidth: '480px',
-        margin: '0 auto',
-        position: 'relative',
-        fontFamily: 'sans-serif',
-    },
-    scrollArea: { padding: '12px', paddingBottom: '0' },
-    header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' },
-    logo: { display: 'flex', alignItems: 'center', gap: '5px' },
-    logoImg: { height: '28px' },
-    logoText: { fontWeight: '700', color: '#2563eb', fontSize: '15px' },
-    emergencyBtn: {
-        background: '#dc2626', color: '#fff', border: 'none',
-        borderRadius: '7px', padding: '5px 10px', fontWeight: '600', cursor: 'pointer', fontSize: '12px',
-    },
-    topBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' },
-    title: { fontSize: '13px', fontWeight: '700', color: '#111' },
-    addBtn: {
-        padding: '5px 11px', background: '#2563eb', color: '#fff',
-        border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: '600',
-    },
-    formCard: {
-        background: '#fff', padding: '14px', borderRadius: '12px',
-        marginBottom: '10px', boxShadow: '0 4px 16px rgba(0,0,0,0.06)',
-    },
-    formTitle: { margin: '0 0 10px', fontSize: '13px', fontWeight: '700' },
-    form: { display: 'flex', flexDirection: 'column', gap: '7px' },
-    input: { padding: '8px 11px', borderRadius: '7px', border: '1px solid #ddd', fontSize: '13px', outline: 'none' },
-    cancelBtn: {
-        flex: 1, background: '#f3f4f6', border: 'none', padding: '10px',
-        borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px',
-    },
-    grid: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' },
-    card: {
-        background: '#fff', borderRadius: '12px', padding: '11px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.07)', textAlign: 'center',
-        display: 'flex', flexDirection: 'column', gap: '2px',
-    },
-    avatar: {
-        width: '38px', height: '38px', borderRadius: '50%',
-        background: colors.primary, color: '#fff',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        margin: '0 auto 5px', fontSize: '15px', fontWeight: '700',
-    },
-    patientName: { margin: '0 0 1px', fontSize: '13px', fontWeight: '700', color: '#111' },
-    patientInfo: { margin: 0, fontSize: '10px', color: '#6b7280' },
-    medSummary: {
-        background: '#f8faff', border: '1px solid #dbeafe',
-        borderRadius: '8px', padding: '6px', margin: '5px 0',
-    },
-    medSummaryTitle: { fontSize: '10px', fontWeight: '600', color: '#374151', marginBottom: '4px' },
-    medBadgeRow: { display: 'flex', gap: '2px', justifyContent: 'center', marginBottom: '4px' },
-    medBadge: { fontSize: '9px', fontWeight: '600', padding: '2px 4px', borderRadius: '20px' },
-    progressBar: { height: '4px', background: '#e5e7eb', borderRadius: '99px', overflow: 'hidden', marginBottom: '3px' },
-    progressFill: { height: '100%', borderRadius: '99px', transition: 'width 0.3s ease' },
-    progressText: { fontSize: '9px', color: '#6b7280' },
-    medEmpty: { fontSize: '10px', color: '#9ca3af', background: '#f9fafb', borderRadius: '6px', padding: '5px', margin: '5px 0' },
-    cardButtons: { display: 'flex', gap: '5px', marginTop: '4px' },
-    detailBtn: {
-        flex: 1, background: '#eff6ff', color: '#2563eb',
-        border: '1px solid #bfdbfe', borderRadius: '5px', padding: '5px 0', cursor: 'pointer', fontSize: '11px',
-    },
-    deleteBtn: {
-        flex: 1, background: '#fff', color: '#dc2626',
-        border: '1px solid #fecaca', borderRadius: '5px', padding: '5px 0', cursor: 'pointer', fontSize: '11px',
-    },
-    bottomNav: {
-        position: 'fixed',
-        bottom: 0,
-        left: '50%',
-        transform: 'translateX(-50%)',
-        width: '100%',
-        maxWidth: '480px',
-        background: '#fff',
-        borderTop: '1px solid #e5e7eb',
-        display: 'flex',
-        justifyContent: 'space-around',
-        alignItems: 'center',
-        padding: '6px 0 10px',
-        boxShadow: '0 -2px 12px rgba(0,0,0,0.08)',
-        zIndex: 100,
-    },
-    navBtn: {
-        display: 'flex', flexDirection: 'column', alignItems: 'center',
-        background: 'none', border: 'none', cursor: 'pointer',
-        padding: '4px 20px', gap: '2px',
-    },
-    navIcon: { fontSize: '20px' },
-    navLabel: { fontSize: '10px', fontWeight: '500' },
-};
