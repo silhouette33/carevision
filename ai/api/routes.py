@@ -369,6 +369,40 @@ async def detect_medication(request: MedicationDetectRequest, background_tasks: 
     return result
 
 
+# ===================================================
+# 라이브 웹캠 감지 (복약 + 낙상 통합)
+# ===================================================
+
+class LiveDetectRequest(BaseModel):
+    image: str  # base64 (data URL 또는 순수 base64)
+    cameraId: str = "webcam"
+
+
+@router.post("/detect/live")
+def detect_live(request: LiveDetectRequest):
+    """
+    프론트엔드 웹캠용 통합 감지 엔드포인트.
+    한 번의 호출로 복약 bbox + 낙상 자세 판정 결과를 동시에 반환.
+    """
+    img_b64 = request.image
+    if "," in img_b64:
+        img_b64 = img_b64.split(",", 1)[1]
+
+    image = medication_detector._decode_image(img_b64)
+    med_objects, all_objects = medication_detector._detect_objects(image)
+    fall_result = fall_detector.detect(img_b64, request.cameraId)
+
+    return {
+        "success": True,
+        "medication": {
+            "detected": len(med_objects) > 0,
+            "objects": med_objects,
+        },
+        "fall": fall_result,
+        "model_type": medication_detector.model_type,
+    }
+
+
 # --- 일반 객체 감지 ---
 @router.post("/detect")
 def detect_objects(request: ImageRequest):
