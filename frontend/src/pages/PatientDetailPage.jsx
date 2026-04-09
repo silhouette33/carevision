@@ -2,333 +2,277 @@ import { useState, useEffect } from 'react';
 import { api } from '../api/client';
 
 const DAYS_KR = { MON: '월', TUE: '화', WED: '수', THU: '목', FRI: '금', SAT: '토', SUN: '일' };
-const ALL_DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+const ALL_DAYS = ['MON','TUE','WED','THU','FRI','SAT','SUN'];
 
-const STATUS_LABEL = {
-  TAKEN: { text: '복약 완료', color: '#16a34a', bg: '#dcfce7', icon: '✅' },
-  MISSED: { text: '복약 누락', color: '#dc2626', bg: '#fee2e2', icon: '❌' },
-  UNCONFIRMED: { text: '미확인', color: '#d97706', bg: '#fef3c7', icon: '⏳' },
+const STATUS = {
+  TAKEN:       { text: '복약 완료', color: 'text-green-700', bg: 'bg-green-50',  border: 'border-green-300', icon: '✅' },
+  MISSED:      { text: '복약 누락', color: 'text-red-700',   bg: 'bg-red-50',    border: 'border-red-300',   icon: '❌' },
+  UNCONFIRMED: { text: '미확인',    color: 'text-amber-700', bg: 'bg-amber-50',  border: 'border-amber-300', icon: '⏳' },
 };
 
 export default function PatientDetailPage({ patient, onBack }) {
-  const [tab, setTab] = useState('medication'); // 'medication' | 'detection'
+  const [tab, setTab] = useState('medication');
   const [medications, setMedications] = useState([]);
   const [logs, setLogs] = useState([]);
   const [detections, setDetections] = useState([]);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [showAddMed, setShowAddMed] = useState(false);
-  const [newMed, setNewMed] = useState({ name: '', dosage: '', scheduleTime: '08:00', days: [] });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0,10));
+  const [showForm, setShowForm] = useState(false);
+  const [newMed, setNewMed] = useState({ name:'', dosage:'', scheduleTime:'08:00', days:[] });
 
-  useEffect(() => {
-    fetchAll();
-  }, []);
-
-  useEffect(() => {
-    if (tab === 'medication') fetchLogs();
-  }, [selectedDate, tab]);
-
-  const MOCK_MEDICATIONS = [
-    { id: 1, name: '혈압약', dosage: '1정', scheduleTime: '08:00', days: 'MON,TUE,WED,THU,FRI,SAT,SUN' },
-    { id: 2, name: '당뇨약', dosage: '2정', scheduleTime: '12:00', days: 'MON,TUE,WED,THU,FRI,SAT,SUN' },
-    { id: 3, name: '수면제', dosage: '1정', scheduleTime: '21:00', days: 'MON,WED,FRI' },
-  ];
-  const MOCK_LOGS = [
-    { id: 1, medicationId: 1, status: 'TAKEN' },
-    { id: 2, medicationId: 2, status: 'MISSED' },
-    { id: 3, medicationId: 3, status: 'UNCONFIRMED' },
-  ];
-  const MOCK_DETECTIONS = [
-    { id: 1, type: 'FALL', confidence: 0.92, detectedAt: new Date(Date.now() - 3600000).toISOString() },
-    { id: 2, type: 'MEDICATION', confidence: 0.87, detectedAt: new Date(Date.now() - 7200000).toISOString() },
-    { id: 3, type: 'NORMAL', confidence: 0.99, detectedAt: new Date(Date.now() - 10800000).toISOString() },
-    { id: 4, type: 'MEDICATION', confidence: 0.81, detectedAt: new Date(Date.now() - 86400000).toISOString() },
-  ];
+  useEffect(() => { fetchAll(); }, []);
 
   const fetchAll = async () => {
-    try {
-      const [meds, dets] = await Promise.all([
-        api.getMedications(patient.id),
-        api.getDetections(patient.id),
-      ]);
-      setMedications(meds);
-      setDetections(dets);
-      await fetchLogs();
-    } catch (err) {
-      // 목업 데이터로 대체 (API 미연결 시)
-      setMedications(MOCK_MEDICATIONS);
-      setDetections(MOCK_DETECTIONS);
-      setLogs(MOCK_LOGS);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchLogs = async () => {
-    try {
-      const data = await api.getMedicationLogs(patient.id, selectedDate);
-      setLogs(data);
-    } catch (err) {
-      setLogs(MOCK_LOGS);
-    }
-  };
-
-  const handleAddMed = async (e) => {
-    e.preventDefault();
-    if (newMed.days.length === 0) return setError('복약 요일을 선택해주세요.');
-    try {
-      await api.createMedication({
-        patientId: patient.id,
-        name: newMed.name,
-        dosage: newMed.dosage,
-        scheduleTime: newMed.scheduleTime,
-        days: newMed.days.join(','),
-      });
-      setShowAddMed(false);
-      setNewMed({ name: '', dosage: '', scheduleTime: '08:00', days: [] });
-      const meds = await api.getMedications(patient.id);
-      setMedications(meds);
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const handleDeleteMed = async (id) => {
-    if (!confirm('이 복약 스케줄을 삭제하시겠습니까?')) return;
-    try {
-      await api.deleteMedication(id);
-      const meds = await api.getMedications(patient.id);
-      setMedications(meds);
-    } catch (err) {
-      setError(err.message);
-    }
+    const meds = await api.getMedications(patient.id);
+    const dets = await api.getDetections(patient.id);
+    const logsData = await api.getMedicationLogs(patient.id);
+    setMedications(meds);
+    setDetections(dets);
+    setLogs(logsData);
   };
 
   const toggleDay = (day) => {
-    setNewMed((prev) => ({
+    setNewMed(prev => ({
       ...prev,
-      days: prev.days.includes(day) ? prev.days.filter((d) => d !== day) : [...prev.days, day],
+      days: prev.days.includes(day)
+          ? prev.days.filter(d => d !== day)
+          : [...prev.days, day]
     }));
   };
 
-  // 오늘 날짜 복약 현황 계산
-  const getMedStatus = (medId) => {
-    const log = logs.find((l) => l.medicationId === medId);
-    return log ? STATUS_LABEL[log.status] : STATUS_LABEL['UNCONFIRMED'];
+  const getStatus = (medId) => {
+    const log = logs.find(l => l.medicationId === medId);
+    return log ? STATUS[log.status] : STATUS.UNCONFIRMED;
   };
 
-  const getDetectionTypeLabel = (type) => {
-    const map = { FALL: { text: '낙상 감지', icon: '🚨', color: '#dc2626' }, MEDICATION: { text: '복약 감지', icon: '💊', color: '#16a34a' }, NORMAL: { text: '정상', icon: '✅', color: '#6b7280' } };
-    return map[type] || { text: type, icon: '•', color: '#6b7280' };
+  const handleAddMed = async () => {
+    if (!newMed.name || !newMed.dosage || newMed.days.length === 0) {
+      alert('약 이름, 용량, 요일을 모두 입력해주세요.');
+      return;
+    }
+    const created = {
+      id: Date.now(),
+      patientId: patient.id,
+      name: newMed.name,
+      dosage: newMed.dosage,
+      scheduleTime: newMed.scheduleTime,
+      days: newMed.days.join(','),
+      isActive: true,
+    };
+    try { await api.createMedication(created); } catch {}
+    setMedications(prev =>
+        [...prev, created].sort((a, b) => a.scheduleTime.localeCompare(b.scheduleTime))
+    );
+    setShowForm(false);
+    setNewMed({ name:'', dosage:'', scheduleTime:'08:00', days:[] });
+  };
+
+  const handleDeleteMed = async (id) => {
+    try { await api.deleteMedication(id); } catch {}
+    setMedications(prev => prev.filter(m => m.id !== id));
   };
 
   return (
-    <div style={styles.container}>
-      {/* 헤더 */}
-      <div style={styles.header}>
-        <button style={styles.backBtn} onClick={onBack}>← 뒤로</button>
-        <div style={styles.patientHeader}>
-          <div style={styles.avatar}>{patient.name[0]}</div>
-          <div>
-            <h1 style={styles.patientName}>{patient.name}</h1>
-            <p style={styles.patientSub}>
-              {[patient.age && `${patient.age}세`, patient.address, patient.phone].filter(Boolean).join(' · ')}
-            </p>
+      <div className="min-h-screen bg-slate-100 font-sans pb-8">
+
+        {/* 헤더 */}
+        <div className="mb-5 px-4 pt-5">
+          <button
+              className="text-blue-600 font-semibold text-sm mb-3 bg-transparent border-none cursor-pointer p-0"
+              onClick={onBack}
+          >
+            ← 뒤로
+          </button>
+          <div className="flex gap-3 items-center">
+            <div className="w-13 h-13 rounded-full bg-blue-800 text-white flex items-center justify-center text-xl font-bold shrink-0 w-12 h-12">
+              {patient.name[0]}
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-gray-900 mb-1">{patient.name}</h2>
+              <p className="text-xs text-gray-500">
+                {patient.age}세 · {patient.address}{patient.phone ? ` · ${patient.phone}` : ''}
+              </p>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* 탭 */}
-      <div style={styles.tabs}>
-        <button style={{ ...styles.tab, ...(tab === 'medication' ? styles.tabActive : {}) }} onClick={() => setTab('medication')}>💊 복약 관리</button>
-        <button style={{ ...styles.tab, ...(tab === 'detection' ? styles.tabActive : {}) }} onClick={() => setTab('detection')}>🚨 감지 이력</button>
-      </div>
+        {/* 탭 */}
+        <div className="flex border-b-2 border-gray-200 mb-5 px-4">
+          <button
+              className={`px-5 py-2 border-none bg-transparent cursor-pointer text-sm font-medium -mb-0.5 border-b-2 transition-colors ${
+                  tab === 'medication'
+                      ? 'text-blue-800 border-b-2 border-blue-800 font-bold'
+                      : 'text-gray-500 border-transparent'
+              }`}
+              onClick={() => setTab('medication')}
+          >
+            💊 복약 관리
+          </button>
+          <button
+              className={`px-5 py-2 border-none bg-transparent cursor-pointer text-sm font-medium -mb-0.5 border-b-2 transition-colors ${
+                  tab === 'detection'
+                      ? 'text-blue-800 border-b-2 border-blue-800 font-bold'
+                      : 'text-gray-500 border-transparent'
+              }`}
+              onClick={() => setTab('detection')}
+          >
+            🚨 감지 이력
+          </button>
+        </div>
 
-      <div style={styles.content}>
-        {error && <p style={styles.error}>{error}</p>}
-        {loading ? <p style={styles.loading}>불러오는 중...</p> : (
-
-          tab === 'medication' ? (
-            <>
-              {/* 복약 스케줄 */}
-              <div style={styles.section}>
-                <div style={styles.sectionHeader}>
-                  <h2 style={styles.sectionTitle}>복약 스케줄</h2>
-                  <button style={styles.addBtn} onClick={() => setShowAddMed(true)}>+ 스케줄 추가</button>
-                </div>
-
-                {showAddMed && (
-                  <div style={styles.formCard}>
-                    <h3 style={styles.formTitle}>새 복약 스케줄 등록</h3>
-                    <form onSubmit={handleAddMed} style={styles.form}>
-                      <div style={styles.formRow}>
-                        <input style={styles.input} placeholder="약 이름 *" value={newMed.name}
-                          onChange={(e) => setNewMed({ ...newMed, name: e.target.value })} required />
-                        <input style={styles.input} placeholder="용량 (예: 1정)" value={newMed.dosage}
-                          onChange={(e) => setNewMed({ ...newMed, dosage: e.target.value })} />
-                      </div>
-                      <div style={styles.formRow}>
-                        <div style={{ flex: 1 }}>
-                          <label style={styles.label}>복약 시간</label>
-                          <input style={styles.input} type="time" value={newMed.scheduleTime}
-                            onChange={(e) => setNewMed({ ...newMed, scheduleTime: e.target.value })} />
-                        </div>
-                      </div>
-                      <div>
-                        <label style={styles.label}>복약 요일</label>
-                        <div style={styles.daysRow}>
-                          {ALL_DAYS.map((d) => (
-                            <button key={d} type="button"
-                              style={{ ...styles.dayBtn, ...(newMed.days.includes(d) ? styles.dayBtnActive : {}) }}
-                              onClick={() => toggleDay(d)}>
-                              {DAYS_KR[d]}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div style={styles.formActions}>
-                        <button style={styles.cancelBtn} type="button" onClick={() => setShowAddMed(false)}>취소</button>
-                        <button style={styles.submitBtn} type="submit">등록</button>
-                      </div>
-                    </form>
+        <div className="px-4">
+          {tab === 'medication' && (
+              <>
+                {/* 복약 스케줄 카드 */}
+                <div className="bg-white rounded-2xl p-5 mb-4 shadow-sm">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-base font-bold text-gray-900">복약 스케줄</h3>
+                    <button
+                        className="px-4 py-2 bg-blue-800 text-white border-none rounded-lg cursor-pointer text-xs font-semibold"
+                        onClick={() => setShowForm(!showForm)}
+                    >
+                      {showForm ? '✕ 닫기' : '+ 스케줄 추가'}
+                    </button>
                   </div>
-                )}
 
-                {medications.length === 0 ? (
-                  <p style={styles.empty}>등록된 복약 스케줄이 없습니다.</p>
-                ) : (
-                  <div style={styles.medList}>
-                    {medications.map((med) => (
-                      <div key={med.id} style={styles.medCard}>
-                        <div style={styles.medTime}>{med.scheduleTime}</div>
-                        <div style={styles.medInfo}>
-                          <span style={styles.medName}>{med.name}</span>
-                          {med.dosage && <span style={styles.medDosage}>{med.dosage}</span>}
-                          <span style={styles.medDays}>
-                            {med.days.split(',').map((d) => DAYS_KR[d] || d).join(' ')}
-                          </span>
+                  {/* 추가 폼 */}
+                  {showForm && (
+                      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex flex-col gap-2 mb-4">
+                        <input
+                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none bg-white"
+                            placeholder="약 이름"
+                            value={newMed.name}
+                            onChange={e => setNewMed({...newMed, name: e.target.value})}
+                        />
+                        <input
+                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none bg-white"
+                            placeholder="용량 (예: 1정)"
+                            value={newMed.dosage}
+                            onChange={e => setNewMed({...newMed, dosage: e.target.value})}
+                        />
+                        <input
+                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none bg-white"
+                            type="time"
+                            value={newMed.scheduleTime}
+                            onChange={e => setNewMed({...newMed, scheduleTime: e.target.value})}
+                        />
+                        <div>
+                          <p className="text-xs text-gray-500 font-medium mb-2">복약 요일 선택</p>
+                          <div className="flex gap-1 flex-wrap">
+                            {ALL_DAYS.map(d => (
+                                <button
+                                    key={d}
+                                    onClick={() => toggleDay(d)}
+                                    className={`w-9 h-9 rounded-full text-xs font-medium border cursor-pointer transition-colors ${
+                                        newMed.days.includes(d)
+                                            ? 'bg-blue-800 text-white border-blue-800'
+                                            : 'bg-white text-gray-700 border-gray-300'
+                                    }`}
+                                >
+                                  {DAYS_KR[d]}
+                                </button>
+                            ))}
+                          </div>
                         </div>
-                        <button style={styles.delBtn} onClick={() => handleDeleteMed(med.id)}>삭제</button>
+                        <div className="flex gap-2 mt-1">
+                          <button
+                              className="flex-1 py-2 bg-blue-800 text-white border-none rounded-lg cursor-pointer font-semibold text-sm"
+                              onClick={handleAddMed}
+                          >
+                            추가
+                          </button>
+                          <button
+                              className="flex-1 py-2 bg-gray-100 text-gray-700 border-none rounded-lg cursor-pointer font-semibold text-sm"
+                              onClick={() => { setShowForm(false); setNewMed({ name:'', dosage:'', scheduleTime:'08:00', days:[] }); }}
+                          >
+                            취소
+                          </button>
+                        </div>
                       </div>
+                  )}
+
+                  {/* 약 목록 */}
+                  <div className="flex flex-col gap-2">
+                    {medications.length === 0 && (
+                        <p className="text-gray-400 text-sm text-center py-5">등록된 복약 스케줄이 없습니다.</p>
+                    )}
+                    {medications.map(m => (
+                        <div key={m.id} className="flex items-center gap-3 p-3 border border-gray-200 rounded-xl bg-gray-50">
+                          <div className="text-base font-bold text-blue-800 min-w-[54px]">{m.scheduleTime}</div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                              {m.name}
+                              <span className="bg-gray-200 text-gray-600 rounded-full px-2 py-0.5 text-xs font-medium">
+                          {m.dosage}
+                        </span>
+                            </div>
+                            <div className="text-xs text-gray-500 mt-0.5">
+                              {m.days && m.days.split(',').map(d => DAYS_KR[d]).join(' ')}
+                            </div>
+                          </div>
+                          <button
+                              className="px-3 py-1.5 bg-white text-red-600 border border-red-200 rounded-lg cursor-pointer text-xs font-semibold shrink-0"
+                              onClick={() => handleDeleteMed(m.id)}
+                          >
+                            삭제
+                          </button>
+                        </div>
                     ))}
                   </div>
-                )}
-              </div>
-
-              {/* 복약 현황 (O/X) */}
-              <div style={styles.section}>
-                <div style={styles.sectionHeader}>
-                  <h2 style={styles.sectionTitle}>복약 현황</h2>
-                  <input style={styles.dateInput} type="date" value={selectedDate}
-                    onChange={(e) => setSelectedDate(e.target.value)} />
                 </div>
 
-                {medications.length === 0 ? (
-                  <p style={styles.empty}>복약 스케줄을 먼저 등록해주세요.</p>
-                ) : (
-                  <div style={styles.statusGrid}>
-                    {medications.map((med) => {
-                      const st = getMedStatus(med.id);
+                {/* 복약 현황 카드 */}
+                <div className="bg-white rounded-2xl p-5 mb-4 shadow-sm">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-base font-bold text-gray-900">복약 현황</h3>
+                    <input
+                        type="date"
+                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-700 outline-none"
+                        value={selectedDate}
+                        onChange={e => setSelectedDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {medications.length === 0 && (
+                        <p className="text-gray-400 text-sm text-center py-5">복약 스케줄을 먼저 등록해주세요.</p>
+                    )}
+                    {medications.map(m => {
+                      const st = getStatus(m.id);
                       return (
-                        <div key={med.id} style={{ ...styles.statusCard, background: st.bg }}>
-                          <span style={styles.statusIcon}>{st.icon}</span>
-                          <div>
-                            <p style={styles.statusName}>{med.name}</p>
-                            <p style={styles.statusTime}>{med.scheduleTime}</p>
+                          <div key={m.id} className={`flex items-center gap-3 p-3 rounded-xl border ${st.bg} ${st.border}`}>
+                            <span className="text-xl">{st.icon}</span>
+                            <div>
+                              <div className={`text-sm font-semibold ${st.color}`}>{m.name}</div>
+                              <div className="text-xs text-gray-500 mt-0.5">{st.text}</div>
+                            </div>
                           </div>
-                          <span style={{ ...styles.statusBadge, color: st.color }}>{st.text}</span>
-                        </div>
                       );
                     })}
                   </div>
-                )}
-              </div>
-            </>
-          ) : (
-            /* 감지 이력 */
-            <div style={styles.section}>
-              <h2 style={styles.sectionTitle}>감지 이력 (최근 100건)</h2>
-              {detections.length === 0 ? (
-                <p style={styles.empty}>감지 이력이 없습니다.</p>
-              ) : (
-                <div style={styles.detectionList}>
-                  {detections.map((d) => {
-                    const type = getDetectionTypeLabel(d.type);
-                    return (
-                      <div key={d.id} style={styles.detectionCard}>
-                        <span style={styles.detectionIcon}>{type.icon}</span>
-                        <div style={styles.detectionInfo}>
-                          <span style={{ ...styles.detectionType, color: type.color }}>{type.text}</span>
-                          <span style={styles.detectionConf}>신뢰도 {Math.round(d.confidence * 100)}%</span>
-                        </div>
-                        <span style={styles.detectionTime}>
-                          {new Date(d.detectedAt).toLocaleString('ko-KR')}
-                        </span>
-                      </div>
-                    );
-                  })}
                 </div>
-              )}
-            </div>
-          )
-        )}
+              </>
+          )}
+
+          {/* 감지 이력 */}
+          {tab === 'detection' && (
+              <div className="bg-white rounded-2xl p-5 shadow-sm">
+                <h3 className="text-base font-bold text-gray-900 mb-4">감지 이력</h3>
+                {detections.length === 0 && (
+                    <p className="text-gray-400 text-sm text-center py-5">감지 이력이 없습니다.</p>
+                )}
+                {detections.map(d => (
+                    <div key={d.id} className="flex gap-3 items-start py-3 border-b border-gray-100 last:border-none">
+                      <span className="text-xl mt-0.5">🚨</span>
+                      <div>
+                        <div className="text-sm font-semibold text-gray-900">{d.type}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">
+                          신뢰도 {Math.round(d.confidence * 100)}% · {new Date(d.detectedAt).toLocaleString('ko-KR')}
+                        </div>
+                      </div>
+                    </div>
+                ))}
+              </div>
+          )}
+        </div>
       </div>
-    </div>
   );
 }
-
-const styles = {
-  container: { minHeight: '100vh', background: '#f1f5f9' },
-  header: { background: '#fff', padding: '16px 24px', boxShadow: '0 1px 4px rgba(0,0,0,0.08)' },
-  backBtn: { background: 'none', border: 'none', color: '#1e40af', fontSize: '15px', cursor: 'pointer', fontWeight: '600', marginBottom: '12px', padding: 0 },
-  patientHeader: { display: 'flex', alignItems: 'center', gap: '14px' },
-  avatar: { width: '52px', height: '52px', borderRadius: '50%', background: '#1e40af', color: '#fff', fontSize: '22px', fontWeight: '700', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  patientName: { fontSize: '22px', fontWeight: '700', color: '#111827', margin: '0 0 4px' },
-  patientSub: { fontSize: '13px', color: '#6b7280', margin: 0 },
-  tabs: { display: 'flex', background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '0 24px' },
-  tab: { padding: '14px 20px', border: 'none', background: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: '500', color: '#6b7280', borderBottom: '2px solid transparent' },
-  tabActive: { color: '#1e40af', borderBottom: '2px solid #1e40af' },
-  content: { maxWidth: '960px', margin: '0 auto', padding: '28px 24px' },
-  error: { color: '#dc2626', fontSize: '14px', marginBottom: '12px' },
-  loading: { color: '#6b7280', textAlign: 'center', padding: '40px' },
-  section: { background: '#fff', borderRadius: '12px', padding: '24px', marginBottom: '20px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
-  sectionHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' },
-  sectionTitle: { fontSize: '17px', fontWeight: '700', color: '#111827', margin: 0 },
-  addBtn: { padding: '8px 16px', background: '#1e40af', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' },
-  formCard: { background: '#f8fafc', borderRadius: '10px', padding: '20px', marginBottom: '16px', border: '1px solid #e2e8f0' },
-  formTitle: { fontSize: '15px', fontWeight: '600', margin: '0 0 14px', color: '#111827' },
-  form: { display: 'flex', flexDirection: 'column', gap: '10px' },
-  formRow: { display: 'flex', gap: '10px' },
-  input: { flex: 1, padding: '9px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px' },
-  label: { fontSize: '12px', color: '#6b7280', fontWeight: '500', display: 'block', marginBottom: '4px' },
-  daysRow: { display: 'flex', gap: '6px', flexWrap: 'wrap' },
-  dayBtn: { width: '36px', height: '36px', border: '1px solid #d1d5db', borderRadius: '50%', cursor: 'pointer', fontSize: '13px', background: '#fff', color: '#374151' },
-  dayBtnActive: { background: '#1e40af', color: '#fff', border: '1px solid #1e40af' },
-  formActions: { display: 'flex', gap: '10px', justifyContent: 'flex-end' },
-  cancelBtn: { padding: '8px 16px', background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '8px', cursor: 'pointer', fontSize: '13px' },
-  submitBtn: { padding: '8px 16px', background: '#1e40af', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' },
-  empty: { color: '#9ca3af', fontSize: '14px', textAlign: 'center', padding: '20px 0' },
-  medList: { display: 'flex', flexDirection: 'column', gap: '8px' },
-  medCard: { display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' },
-  medTime: { fontSize: '15px', fontWeight: '700', color: '#1e40af', minWidth: '52px' },
-  medInfo: { flex: 1, display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' },
-  medName: { fontSize: '14px', fontWeight: '600', color: '#111827' },
-  medDosage: { fontSize: '12px', color: '#6b7280', background: '#e5e7eb', padding: '2px 8px', borderRadius: '12px' },
-  medDays: { fontSize: '12px', color: '#6b7280' },
-  delBtn: { padding: '5px 10px', background: '#fff', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' },
-  dateInput: { padding: '7px 10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px' },
-  statusGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '10px' },
-  statusCard: { display: 'flex', alignItems: 'center', gap: '12px', padding: '14px', borderRadius: '10px' },
-  statusIcon: { fontSize: '22px' },
-  statusName: { fontSize: '14px', fontWeight: '600', color: '#111827', margin: '0 0 2px' },
-  statusTime: { fontSize: '12px', color: '#6b7280', margin: 0 },
-  statusBadge: { marginLeft: 'auto', fontSize: '12px', fontWeight: '600' },
-  detectionList: { display: 'flex', flexDirection: 'column', gap: '8px' },
-  detectionCard: { display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' },
-  detectionIcon: { fontSize: '20px' },
-  detectionInfo: { flex: 1, display: 'flex', gap: '10px', alignItems: 'center' },
-  detectionType: { fontSize: '14px', fontWeight: '600' },
-  detectionConf: { fontSize: '12px', color: '#6b7280' },
-  detectionTime: { fontSize: '12px', color: '#9ca3af' },
-};

@@ -46,37 +46,67 @@ const request = async (method, path, body = null) => {
 };
 
 const useMock = async (fn, fallback) => {
-  try { return await fn(); } catch { return fallback; }
+  try {
+    return await fn();
+  } catch {
+    return fallback;
+  }
 };
 
 export const api = {
   // 인증
   register: (body) => request('POST', '/auth/register', body),
-  login: (body) => request('POST', '/auth/login', body),
-
+  login: (body) => useMock(
+      () => request('POST', '/auth/login', body),
+      { token: 'mock-token', user: { email: body.email, name: '테스트유저' } }
+  ),
   // 환자
   getPatients: () => useMock(() => request('GET', '/patients'), MOCK.patients),
-  getPatient: (id) => useMock(() => request('GET', `/patients/${id}`), MOCK.patients.find(p => p.id === id)),
-  createPatient: (body) => useMock(() => request('POST', '/patients', body), { ...body, id: Date.now() }),
-  updatePatient: (id, body) => useMock(() => request('PUT', `/patients/${id}`, body), { message: '수정 완료' }),
-  deletePatient: (id) => useMock(() => request('DELETE', `/patients/${id}`), { message: '삭제 완료' }),
+  getPatient: (id) =>
+      useMock(() => request('GET', `/patients/${id}`), MOCK.patients.find(p => p.id === id)),
+  createPatient: (body) =>
+      useMock(() => request('POST', '/patients', body), { ...body, id: Date.now() }),
+  updatePatient: (id, body) =>
+      useMock(() => request('PUT', `/patients/${id}`, body), { message: '수정 완료' }),
+  deletePatient: (id) =>
+      useMock(() => request('DELETE', `/patients/${id}`), { message: '삭제 완료' }),
 
-  // 복약 스케줄
-  getMedications: (patientId) => useMock(() => request('GET', `/medications/${patientId}`), MOCK.medications.filter(m => m.patientId === Number(patientId))),
-  createMedication: (body) => useMock(() => request('POST', '/medications', body), { ...body, id: Date.now() }),
-  updateMedication: (id, body) => useMock(() => request('PATCH', `/medications/${id}`, body), { message: '수정 완료' }),
-  deleteMedication: (id) => useMock(() => request('DELETE', `/medications/${id}`), { message: '삭제 완료' }),
+  // 복약
+  getMedications: (patientId) =>
+      useMock(() => request('GET', `/medications/${patientId}`),
+          MOCK.medications.filter(m => m.patientId === Number(patientId))
+      ),
 
-  // 복약 기록
+  createMedication: (body) =>
+      useMock(() => request('POST', '/medications', body), { ...body, id: Date.now() }),
+
+  deleteMedication: (id) =>
+      useMock(() => request('DELETE', `/medications/${id}`), { message: '삭제 완료' }),
+
+  // 로그
   getMedicationLogs: (patientId, date) =>
-    useMock(() => request('GET', `/medications/logs/${patientId}${date ? `?date=${date}` : ''}`), MOCK.medicationLogs.filter(l => l.patientId === Number(patientId))),
+      useMock(
+          () => request('GET', `/medications/logs/${patientId}${date ? `?date=${date}` : ''}`),
+          MOCK.medicationLogs.filter(l => l.patientId === Number(patientId))
+      ),
 
-  // 감지 이력
-  getDetections: (patientId) => useMock(() => request('GET', `/detections?patientId=${patientId}`), MOCK.detections),
+  // 감지
+  getDetections: (patientId) =>
+      useMock(() => request('GET', `/detections?patientId=${patientId}`), MOCK.detections),
 
   // 알림
-  getNotifications: () => useMock(() => request('GET', '/notifications'), MOCK.notifications),
-  getUnreadCount: () => useMock(() => request('GET', '/notifications/unread-count'), { count: MOCK.notifications.filter(n => !n.isRead).length }),
-  markAsRead: (id) => useMock(() => request('PATCH', `/notifications/${id}/read`), { message: '읽음 처리 완료' }),
-  markAllAsRead: () => useMock(() => request('PATCH', '/notifications/read-all'), { message: '전체 읽음 처리 완료' }),
+  getNotifications: () =>
+      useMock(() => request('GET', '/notifications'), MOCK.notifications),
+
+  getUnreadCount: () =>
+      useMock(
+          () => request('GET', '/notifications/unread-count'),
+          { count: MOCK.notifications.filter(n => !n.isRead).length }
+      ),
+
+  markAsRead: (id) =>
+      useMock(() => request('PATCH', `/notifications/${id}/read`), { message: '읽음 처리 완료' }),
+
+  markAllAsRead: () =>
+      useMock(() => request('PATCH', '/notifications/read-all'), { message: '전체 읽음 처리 완료' }),
 };
