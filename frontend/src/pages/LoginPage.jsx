@@ -1,68 +1,65 @@
 import { useState } from 'react';
-import { api } from '../api/client';
+import logo from '../assets/CareVision.png';
 
 export default function LoginPage({ onLogin }) {
     const [mode, setMode] = useState('login');
-    const [form, setForm] = useState({ email: '', password: '', name: '' });
+    const [form, setForm] = useState({ username: '', password: '' });
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
 
-    const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
+    const handleChange = (e) => {
+        setForm({ ...form, [e.target.name]: e.target.value });
+        setError('');
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        setError('');
         setLoading(true);
         try {
-            if (mode === 'register') {
-                await api.register(form);
-                setMode('login');
-                setError('회원가입 완료! 로그인해주세요.');
-            } else {
-                const data = await api.login({ email: form.email, password: form.password });
-                localStorage.setItem('token', data.token);
-                localStorage.setItem('user', JSON.stringify(data.user));
-                onLogin(data.user);
-            }
+            await onLogin(form, mode);
         } catch (err) {
-            setError(err.message);
+            setError(err.message || '오류가 발생했습니다.');
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-800 to-blue-500 flex items-center justify-center p-4 sm:p-6">
-            <div className="bg-white rounded-2xl p-8 w-full max-w-sm shadow-2xl sm:p-10">
+        <div className="min-h-screen bg-slate-100 max-w-[480px] mx-auto font-sans flex flex-col justify-center px-6">
 
-                {/* 로고 */}
-                <div className="text-center mb-6">
-                    <span className="text-5xl block">👁️</span>
-                    <h1 className="text-2xl font-bold text-blue-800 mt-2 mb-1 sm:text-3xl">CareVision</h1>
-                    <p className="text-xs text-gray-500 sm:text-sm">독거노인 스마트 케어 모니터링</p>
+            {/* 로고 영역 */}
+            <div className="flex flex-col items-center mb-8 gap-2">
+                <div className="w-20 h-20 bg-blue-700 rounded-2xl flex items-center justify-center">
+                    <img src={logo} alt="logo" className="h-12" />
                 </div>
+                <span className="font-bold text-blue-700 text-2xl tracking-tight">CareVision</span>
+                <span className="text-xs text-gray-400">환자 케어 모니터링 시스템</span>
+            </div>
 
-                {/* 탭 */}
-                <div className="flex rounded-lg overflow-hidden border border-gray-200 mb-6">
+            {/* 카드 */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm">
+
+                {/* 로그인 / 회원가입 탭 */}
+                <div className="flex bg-slate-100 rounded-xl p-1 mb-5">
                     <button
-                        type="button"
-                        className={`flex-1 py-3 text-sm font-medium transition-colors min-h-[44px] ${
+                        className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${
                             mode === 'login'
-                                ? 'bg-blue-800 text-white'
-                                : 'bg-gray-50 text-gray-500'
+                                ? 'bg-white text-blue-700 shadow-sm'
+                                : 'text-gray-400'
                         }`}
-                        onClick={() => setMode('login')}
+                        onClick={() => { setMode('login'); setError(''); }}
+                        type="button"
                     >
                         로그인
                     </button>
                     <button
-                        type="button"
-                        className={`flex-1 py-3 text-sm font-medium transition-colors min-h-[44px] ${
+                        className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${
                             mode === 'register'
-                                ? 'bg-blue-800 text-white'
-                                : 'bg-gray-50 text-gray-500'
+                                ? 'bg-white text-blue-700 shadow-sm'
+                                : 'text-gray-400'
                         }`}
-                        onClick={() => setMode('register')}
+                        onClick={() => { setMode('register'); setError(''); }}
+                        type="button"
                     >
                         회원가입
                     </button>
@@ -70,30 +67,18 @@ export default function LoginPage({ onLogin }) {
 
                 {/* 폼 */}
                 <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-                    {mode === 'register' && (
-                        <input
-                            className="px-3 py-3 border border-gray-300 rounded-lg text-base outline-none w-full transition-colors focus:border-blue-800 focus:ring-2 focus:ring-blue-100 appearance-none"
-                            name="name"
-                            placeholder="이름"
-                            value={form.name}
-                            onChange={handleChange}
-                            autoComplete="name"
-                            required
-                        />
-                    )}
                     <input
-                        className="px-3 py-3 border border-gray-300 rounded-lg text-base outline-none w-full transition-colors focus:border-blue-800 focus:ring-2 focus:ring-blue-100 appearance-none"
-                        name="email"
-                        type="email"
-                        placeholder="이메일"
-                        value={form.email}
+                        className="px-3.5 py-3 border border-gray-200 rounded-xl text-sm outline-none w-full bg-gray-50 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
+                        name="username"
+                        type="text"
+                        placeholder="아이디"
+                        value={form.username}
                         onChange={handleChange}
-                        autoComplete="email"
-                        inputMode="email"
+                        autoComplete="username"
                         required
                     />
                     <input
-                        className="px-3 py-3 border border-gray-300 rounded-lg text-base outline-none w-full transition-colors focus:border-blue-800 focus:ring-2 focus:ring-blue-100 appearance-none"
+                        className="px-3.5 py-3 border border-gray-200 rounded-xl text-sm outline-none w-full bg-gray-50 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-colors"
                         name="password"
                         type="password"
                         placeholder="비밀번호"
@@ -104,13 +89,15 @@ export default function LoginPage({ onLogin }) {
                     />
 
                     {error && (
-                        <p className={`text-xs text-center ${error.includes('완료') ? 'text-green-600' : 'text-red-600'}`}>
+                        <p className={`text-xs text-center ${
+                            error.includes('완료') ? 'text-green-600' : 'text-red-500'
+                        }`}>
                             {error}
                         </p>
                     )}
 
                     <button
-                        className="mt-1 py-3 bg-blue-800 text-white rounded-lg text-sm font-semibold w-full min-h-[48px] transition-colors disabled:opacity-60 disabled:cursor-not-allowed active:bg-blue-900 appearance-none"
+                        className="mt-1 py-3 bg-blue-700 text-white rounded-xl text-sm font-semibold w-full transition-colors disabled:opacity-60 disabled:cursor-not-allowed active:bg-blue-800"
                         type="submit"
                         disabled={loading}
                     >
@@ -118,6 +105,10 @@ export default function LoginPage({ onLogin }) {
                     </button>
                 </form>
             </div>
+
+            <p className="text-center text-[11px] text-gray-400 mt-5">
+                © 2025 CareVision. All rights reserved.
+            </p>
         </div>
     );
 }
