@@ -6,6 +6,7 @@ import NotificationsPage from './pages/NotificationsPage';
 import LoginPage from './pages/LoginPage';
 import CameraPage from './camera/CameraPage';
 import MyPage from "./pages/MyPage.jsx";
+import { api } from './api/client';
 
 const NAV_ITEMS = [
     { id: 'dashboard', icon: Home,          label: '홈' },
@@ -21,7 +22,15 @@ export default function App() {
     const [activeTab, setActiveTab] = useState('dashboard');
     const [patients, setPatients] = useState([]);
 
-    if (!user) return <LoginPage onLogin={setUser} />;
+    const handleLogin = async (form, mode) => {
+        const data = mode === 'register'
+            ? await api.register(form)
+            : await api.login(form);
+        if (data?.token) localStorage.setItem('token', data.token);
+        setUser(data?.user ?? { name: form.username });
+    };
+
+    if (!user) return <LoginPage onLogin={handleLogin} />;
 
     const handleNav = (id) => {
         if (id === 'camera') {
