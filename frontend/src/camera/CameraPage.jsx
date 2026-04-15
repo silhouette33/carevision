@@ -72,8 +72,11 @@ function LiveDetectionView({ patient, onChangePatient }) {
     const [modelType, setModelType] = useState('-');
     const [lastLatency, setLastLatency] = useState(0);
     const [alerts, setAlerts] = useState([]); // 상단 토스트 알림
+    const [medScore, setMedScore] = useState(null);     // {taken, score, status, signals, window}
+    const [handMouth, setHandMouth] = useState(null);   // {confidence, status}
     const prevFallStatus = useRef('idle');
     const prevMedCount = useRef(0);
+    const prevTaken = useRef(false);
 
     const pushAlert = useCallback((type, text) => {
         const id = Date.now() + Math.random();
@@ -105,7 +108,24 @@ function LiveDetectionView({ patient, onChangePatient }) {
         setStreaming(false);
         setMedObjects([]);
         setFall({ status: 'idle', confidence: 0 });
+        setMedScore(null);
+        setHandMouth(null);
         clearOverlay();
+    };
+
+    const resetScorer = async () => {
+        try {
+            await fetch(`${AI_URL}/detect/reset`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cameraId: `patient-${patient.id}` }),
+            });
+            prevTaken.current = false;
+            setMedScore(null);
+            pushAlert('info', '🔄 스코어러 리셋 완료');
+        } catch (e) {
+            pushAlert('warn', '리셋 실패: ' + e.message);
+        }
     };
 
     const clearOverlay = () => {
@@ -165,6 +185,8 @@ function LiveDetectionView({ patient, onChangePatient }) {
                 setMedObjects(objs);
                 setFall(json.fall || { status: 'unknown', confidence: 0 });
                 setModelType(json.model_type);
+                setMedScore(json.medication_score || null);
+                setHandMouth(json.hand_to_mouth || null);
                 drawOverlay(objs, w, h);
                 setLastLatency(Math.round(performance.now() - t0));
 
@@ -183,6 +205,13 @@ function LiveDetectionView({ patient, onChangePatient }) {
                     pushAlert('info', `💊 약 ${objs.length}개 감지`);
                 }
                 prevMedCount.current = objs.length;
+
+                // 복약 완료 판정 순간 한 번만 토스트
+                const takenNow = !!json.medication_score?.taken;
+                if (takenNow && !prevTaken.current) {
+                    pushAlert('info', '✅ 복약 완료 확정!');
+                }
+                prevTaken.current = takenNow;
             }
         } catch (e) {
             // 서버 죽어있는 경우 조용히 pass
@@ -309,7 +338,157 @@ function LiveDetectionView({ patient, onChangePatient }) {
                             ■ 카메라 정지
                         </button>
                     )}
+                    <button
+                        onClick={resetScorer}
+                        className="bg-gray-200 text-gray-800 rounded-xl py-3 px-4 font-bold text-sm border-none cursor-pointer"
+                    >
+                        🔄 리셋
+                    </button>
                 </div>
+
+                {/* 복약 완료 큰 배너 */}
+                {medScore?.taken && (
+                    <div className="mt-3 bg-green-600 text-white rounded-xl p-4 text-center shadow-lg">
+                        <p className="text-[11px] m-0 opacity-90">MEDICATION TAKEN</p>
+                        <p className="text-lg font-bold m-0 mt-1">✅ 복약 완료</p>
+                        <p className="text-[10px] m-0 mt-1 opacity-90">
+                            score {(medScore.score ?? 0).toFixed(2)} · status {medScore.status}
+                        </p>
+                    </div>
+                )}
+
+                {/* 복약 스코어 상세 카드 */}
+                {medScore && (
+                    <div className="mt-3 bg-white rounded-xl p-3 border border-gray-200">
+                        <div className="flex justify-between items-center mb-2">
+                            <p className="text-[12px] font-bold text-gray-800 m-0">📊 복약 스코어</p>
+                            <span
+                                className={`text-[10px] font-bold rounded px-2 py-0.5 ${
+                                    medScore.status === 'taken'
+                                        ? 'bg-green-100 text-green-700'
+                                        : medScore.status === 'preparing'
+                                        ? 'bg-yellow-100 text-yellow-700'
+                                        : medScore.status === 'eating_unknown'
+                                        ? 'bg-orange-100 text-orange-700'
+                                        : 'bg-gray-100 text-gray-600'
+                                }`}
+                            >
+                                {medScore.status}
+                            </span>
+                        </div>
+
+                        {/* 총점 게이지 */}
+                        <div className="mb-2">
+                            <div className="flex justify-between text-[10px] text-gray-500 mb-1">
+                                <span>score</span>
+                                <span className="font-mono">{(medScore.score ?? 0).toFixed(3)}</span>
+                            </div>
+                            <div className="w-full h-2 bg-gray-100 rounded">
+                                <div
+                                    className="h-2 rounded bg-green-500 transition-all"
+                                    style={{ width: `${Math.min(100, (medScore.score ?? 0) * 100)}%` }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* 박스 프레임 진행도 */}
+                        <div className="mb-2">
+                            <div className="flex justify-between text-[10px] text-gray-500 mb-1">
+                                <span>약통 감지 프레임</span>
+                                <span className="font-mono">
+                                    {medScore.window.box_frames} / {medScore.window.total_frames}
+                                    {'  (min '}{medScore.window.box_min}{')'}
+                                </span>
+                            </div>
+                            <div className="w-full h-1.5 bg-gray-100 rounded">
+                                <div
+                                    className={`h-1.5 rounded transition-all ${
+                                        medScore.window.box_frames >= medScore.window.box_min
+                                            ? 'bg-green-500'
+                                            : 'bg-blue-400'
+                                    }`}
+                                    style={{
+                                        width: `${Math.min(
+                                            100,
+                                            (medScore.window.box_frames /
+                                                Math.max(1, medScore.window.box_min)) *
+                                                100
+                                        )}%`,
+                                    }}
+                                />
+                            </div>
+                        </div>
+
+                        {/* 모션 프레임 진행도 */}
+                        <div className="mb-2">
+                            <div className="flex justify-between text-[10px] text-gray-500 mb-1">
+                                <span>손→입 동작 프레임</span>
+                                <span className="font-mono">
+                                    {medScore.window.motion_frames} / {medScore.window.total_frames}
+                                    {'  (min '}{medScore.window.motion_min}{')'}
+                                </span>
+                            </div>
+                            <div className="w-full h-1.5 bg-gray-100 rounded">
+                                <div
+                                    className={`h-1.5 rounded transition-all ${
+                                        medScore.window.motion_frames >= medScore.window.motion_min
+                                            ? 'bg-green-500'
+                                            : 'bg-purple-400'
+                                    }`}
+                                    style={{
+                                        width: `${Math.min(
+                                            100,
+                                            (medScore.window.motion_frames /
+                                                Math.max(1, medScore.window.motion_min)) *
+                                                100
+                                        )}%`,
+                                    }}
+                                />
+                            </div>
+                        </div>
+
+                        <p className="text-[10px] text-gray-400 m-0 mt-1">
+                            시간창 {medScore.window.seconds}s · 박스 최고 conf{' '}
+                            {((medScore.signals?.box_top_confidence ?? 0) * 100).toFixed(0)}%
+                        </p>
+                    </div>
+                )}
+
+                {/* 손→입 LSTM 카드 */}
+                {handMouth && (
+                    <div className="mt-3 bg-white rounded-xl p-3 border border-gray-200">
+                        <div className="flex justify-between items-center mb-2">
+                            <p className="text-[12px] font-bold text-gray-800 m-0">✋ 손→입 동작 (LSTM)</p>
+                            <span
+                                className={`text-[10px] font-bold rounded px-2 py-0.5 ${
+                                    handMouth.detected
+                                        ? 'bg-red-100 text-red-700'
+                                        : (handMouth.status || '').includes('suspect')
+                                        ? 'bg-orange-100 text-orange-700'
+                                        : 'bg-gray-100 text-gray-600'
+                                }`}
+                            >
+                                {handMouth.status || '-'}
+                            </span>
+                        </div>
+                        <div className="flex justify-between text-[10px] text-gray-500 mb-1">
+                            <span>확률</span>
+                            <span className="font-mono">
+                                {((handMouth.confidence ?? 0) * 100).toFixed(1)}%
+                            </span>
+                        </div>
+                        <div className="w-full h-2 bg-gray-100 rounded">
+                            <div
+                                className={`h-2 rounded transition-all ${
+                                    (handMouth.confidence ?? 0) >= 0.5 ? 'bg-red-500' : 'bg-purple-400'
+                                }`}
+                                style={{
+                                    width: `${Math.min(100, (handMouth.confidence ?? 0) * 100)}%`,
+                                }}
+                            />
+                        </div>
+                    </div>
+                )}
 
                 {error && (
                     <div className="mt-3 bg-red-100 text-red-700 text-xs p-3 rounded-lg">

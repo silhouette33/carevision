@@ -10,8 +10,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from pipelines.fall_detector import fall_detector
 from pipelines.medication_detector import medication_detector
+from pipelines.hand_to_mouth_detector import hand_to_mouth_detector
+from pipelines.medication_scorer import init_scorer
 from detector import detector
 from services.backend_client import notify_detection, notify_medication_log
+
+# 스코어러 초기화 (약 감지 + 손→입 LSTM 결합)
+medication_scorer = init_scorer(medication_detector, hand_to_mouth_detector)
 
 router = APIRouter()
 
@@ -382,25 +387,54 @@ class LiveDetectRequest(BaseModel):
 def detect_live(request: LiveDetectRequest):
     """
     프론트엔드 웹캠용 통합 감지 엔드포인트.
-    한 번의 호출로 복약 bbox + 낙상 자세 판정 결과를 동시에 반환.
+    - 약 객체 감지 (YOLO/ONNX)
+    - 손→입 동작 감지 (MediaPipe Hands + LSTM)
+    - 낙상 자세 판정 (MediaPipe Pose)
+    - 두 복약 신호를 시간창에서 결합해 TAKEN 판정 산출
     """
     img_b64 = request.image
     if "," in img_b64:
         img_b64 = img_b64.split(",", 1)[1]
 
-    image = medication_detector._decode_image(img_b64)
-    med_objects, all_objects = medication_detector._detect_objects(image)
+    # 복약 스코어링 (내부에서 medication_detector + hand_to_mouth_detector 호출)
+    score_result = medication_scorer.update(img_b64, request.cameraId)
+
+    # 낙상은 별도 파이프라인
     fall_result = fall_detector.detect(img_b64, request.cameraId)
 
     return {
         "success": True,
         "medication": {
-            "detected": len(med_objects) > 0,
-            "objects": med_objects,
+            "detected": len(score_result["medication_objects"]) > 0,
+            "objects": score_result["medication_objects"],
+        },
+        "hand_to_mouth": {
+            "detected": bool(score_result["signals"]["hand_to_mouth_prob"]
+                             >= medication_scorer.MOTION_POS_THRESHOLD),
+            "confidence": score_result["signals"]["hand_to_mouth_prob"],
+            "status": score_result["signals"]["hand_status"],
+        },
+        "medication_score": {
+            "taken": score_result["taken"],
+            "score": score_result["score"],
+            "status": score_result["status"],
+            "window": score_result["window"],
         },
         "fall": fall_result,
         "model_type": medication_detector.model_type,
     }
+
+
+class ResetRequest(BaseModel):
+    cameraId: str = "webcam"
+
+
+@router.post("/detect/reset")
+def detect_reset(request: ResetRequest):
+    """카메라의 모든 스코어러/카운터 초기화."""
+    medication_scorer.reset(request.cameraId)
+    fall_detector.reset(request.cameraId)
+    return {"success": True, "cameraId": request.cameraId, "message": "reset ok"}
 
 
 # --- 일반 객체 감지 ---
