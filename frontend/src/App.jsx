@@ -31,6 +31,7 @@ export default function App() {
     const [patients, setPatients] = useState([]);
 
     const handleLogin = async (form, mode) => {
+<<<<<<< HEAD
         if (mode === 'register') {
             await api.register(form);
             throw new Error('회원가입 완료! 로그인해주세요.');
@@ -47,6 +48,13 @@ export default function App() {
         setUser(null);
         setPage('dashboard');
         setActiveTab('dashboard');
+=======
+        const data = mode === 'register'
+            ? await api.register(form)
+            : await api.login(form);
+        if (data?.token) localStorage.setItem('token', data.token);
+        setUser(data?.user ?? { name: form.username });
+>>>>>>> 4742bed9dfa5967932158627473369faafe9d831
     };
 
     if (!user) return <LoginPage onLogin={handleLogin} />;

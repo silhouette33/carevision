@@ -43,7 +43,8 @@ export default function CameraPage({ patient, patients = [], onSelectPatient, on
     }
 
     // 환자 선택 후 → 카메라 화면
-    const streamUrl = `http://localhost:5000/stream/${selectedLocal.id}`;
+    const AI_BASE = import.meta.env.VITE_AI_BASE_URL || 'http://localhost:8000';
+    const streamUrl = `${AI_BASE}/stream/${selectedLocal.id}`;
 
     return (
         <div className="min-h-screen bg-slate-100 max-w-[480px] mx-auto font-sans">
