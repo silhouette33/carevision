@@ -6,6 +6,7 @@ import NotificationsPage from './pages/NotificationsPage';
 import LoginPage from './pages/LoginPage';
 import CameraPage from './camera/CameraPage';
 import MyPage from "./pages/MyPage.jsx";
+import { api } from './api/client';
 
 const NAV_ITEMS = [
     { id: 'dashboard', icon: Home,          label: '홈' },
@@ -15,13 +16,40 @@ const NAV_ITEMS = [
 ];
 
 export default function App() {
-    const [user, setUser] = useState(null);
+    const [user, setUser] = useState(() => {
+        try {
+            const token = localStorage.getItem('token');
+            const saved = localStorage.getItem('user');
+            if (token && saved) return JSON.parse(saved);
+        } catch {}
+        return null;
+    });
+
     const [page, setPage] = useState('dashboard');
     const [selectedPatient, setSelectedPatient] = useState(null);
     const [activeTab, setActiveTab] = useState('dashboard');
     const [patients, setPatients] = useState([]);
 
-    if (!user) return <LoginPage onLogin={setUser} />;
+    const handleLogin = async (form, mode) => {
+        if (mode === 'register') {
+            await api.register(form);
+            throw new Error('회원가입 완료! 로그인해주세요.');
+        }
+        const result = await api.login(form);
+        localStorage.setItem('token', result.token);
+        localStorage.setItem('user', JSON.stringify(result.user));
+        setUser(result.user);
+    };
+
+    const handleLogout = () => {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        setUser(null);
+        setPage('dashboard');
+        setActiveTab('dashboard');
+    };
+
+    if (!user) return <LoginPage onLogin={handleLogin} />;
 
     const handleNav = (id) => {
         if (id === 'camera') {
@@ -44,7 +72,7 @@ export default function App() {
         }
 
         if (page === 'mypage') {
-            return <MyPage user={user} onLogout={() => setUser(null)} />;
+            return <MyPage user={user} onLogout={handleLogout} />;
         }
         if (page === 'notifications') return <NotificationsPage />;
         if (page === 'camera') {
@@ -73,7 +101,6 @@ export default function App() {
                 {renderPage()}
             </div>
 
-            {/* 하단 네비게이션 바 */}
             <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[480px] bg-white border-t border-gray-200 flex justify-around items-center py-1.5 pb-2.5 shadow-[0_-2px_12px_rgba(0,0,0,0.08)] z-50">
                 {NAV_ITEMS.map(({ id, icon: Icon, label }) => {
                     const isActive = activeTab === id;

@@ -5,6 +5,7 @@ import logo from '../assets/CareVision.png';
 export default function DashboardPage({ user, onSelectPatient, onEmergency, onPatientsLoaded }) {
     const [patients, setPatients] = useState([]);
     const [medSummary, setMedSummary] = useState({});
+    const [detectionStatus, setDetectionStatus] = useState({}); // ✅ 추가
     const [showForm, setShowForm] = useState(false);
     const [newPatient, setNewPatient] = useState({
         name: '', age: '', address: '', phone: '', cameraId: '',
@@ -26,6 +27,7 @@ export default function DashboardPage({ user, onSelectPatient, onEmergency, onPa
         setPatients(all);
         onPatientsLoaded?.(all);
         fetchMedSummaries(all);
+        fetchDetectionStatuses(all); // ✅ 추가
     };
 
     const EXTRA_MED_MOCK = {
@@ -35,6 +37,16 @@ export default function DashboardPage({ user, onSelectPatient, onEmergency, onPa
         6: { total: 3, taken: 0, missed: 2 },
         7: { total: 2, taken: 2, missed: 0 },
         8: { total: 3, taken: 1, missed: 1 },
+    };
+
+    // ✅ 추가: 환자별 mock 위험 감지 데이터
+    const EXTRA_DETECTION_MOCK = {
+        3: 'NORMAL',
+        4: 'MEDICATION',
+        5: 'NORMAL',
+        6: 'FALL',
+        7: 'NORMAL',
+        8: 'MEDICATION',
     };
 
     const fetchMedSummaries = async (patientList) => {
@@ -56,6 +68,26 @@ export default function DashboardPage({ user, onSelectPatient, onEmergency, onPa
         setMedSummary(summaries);
     };
 
+    // ✅ 추가: 환자별 최근 위험 감지 상태 fetch
+    const fetchDetectionStatuses = async (patientList) => {
+        const statuses = {};
+        await Promise.all(patientList.map(async (p) => {
+            try {
+                const detections = await api.getDetections(p.id);
+                if (!detections || detections.length === 0) {
+                    statuses[p.id] = 'NORMAL';
+                    return;
+                }
+                // 가장 최근 감지 기준
+                const latest = detections[0];
+                statuses[p.id] = latest.type; // 'FALL' | 'MEDICATION' | 'NORMAL'
+            } catch {
+                statuses[p.id] = EXTRA_DETECTION_MOCK[p.id] || 'NORMAL';
+            }
+        }));
+        setDetectionStatus(statuses);
+    };
+
     const handleAddPatient = (e) => {
         e.preventDefault();
         const all = [{ id: Date.now(), ...newPatient }, ...patients];
@@ -75,6 +107,30 @@ export default function DashboardPage({ user, onSelectPatient, onEmergency, onPa
         const s = medSummary[id];
         if (!s || s.total === 0) return null;
         return { ...s, unconfirmed: s.total - s.taken - s.missed };
+    };
+
+    // ✅ 추가: 위험 배지 렌더 함수
+    const getRiskBadge = (id) => {
+        const status = detectionStatus[id];
+        if (status === 'FALL') {
+            return (
+                <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-200">
+                    🔴 낙상감지
+                </span>
+            );
+        }
+        if (status === 'MEDICATION') {
+            return (
+                <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-600 border border-amber-200">
+                    🟡 복약미감지
+                </span>
+            );
+        }
+        return (
+            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-green-100 text-green-600 border border-green-200">
+                🟢 정상
+            </span>
+        );
     };
 
     return (
@@ -137,6 +193,11 @@ export default function DashboardPage({ user, onSelectPatient, onEmergency, onPa
                                 <h3 className="text-sm font-bold text-gray-900 m-0">{p.name}</h3>
                                 <p className="text-[10px] text-gray-500 m-0">{p.age && `${p.age}세`}</p>
                                 <p className="text-[10px] text-gray-500 m-0">{p.address}</p>
+
+                                {/* ✅ 위험 감지 배지 */}
+                                <div className="flex justify-center mt-0.5">
+                                    {getRiskBadge(p.id)}
+                                </div>
 
                                 {med ? (
                                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-1.5 my-1">

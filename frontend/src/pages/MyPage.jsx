@@ -65,7 +65,6 @@ export default function MyPage({ user, onLogout }) {
     return (
         <div className="min-h-screen bg-slate-100 max-w-[480px] mx-auto font-sans">
 
-            {/* 상단 프로필 헤더 */}
             <div className="bg-blue-700 px-4 pt-6 pb-8">
                 <p className="text-xs font-semibold text-blue-300 mb-4">마이페이지</p>
                 <div className="flex items-center gap-3.5">
@@ -82,7 +81,6 @@ export default function MyPage({ user, onLogout }) {
                     </div>
                 </div>
 
-                {/* 요약 스탯 */}
                 <div className="grid grid-cols-3 gap-2 mt-5">
                     {[
                         { value: '8명', label: '담당 환자', color: 'text-white' },
@@ -99,7 +97,6 @@ export default function MyPage({ user, onLogout }) {
 
             <div className="px-3 pt-3 pb-6 flex flex-col gap-2.5">
 
-                {/* 알림 설정 */}
                 <div className="bg-white rounded-2xl px-4 py-3.5 shadow-sm">
                     <p className="text-xs font-bold text-gray-900 mb-3">알림 설정</p>
                     <div className="flex flex-col">
@@ -123,7 +120,6 @@ export default function MyPage({ user, onLogout }) {
                     </div>
                 </div>
 
-                {/* 계정 설정 */}
                 <div className="bg-white rounded-2xl px-4 py-3.5 shadow-sm">
                     <p className="text-xs font-bold text-gray-900 mb-3">계정 설정</p>
                     <div className="flex flex-col">
@@ -144,7 +140,7 @@ export default function MyPage({ user, onLogout }) {
                     </div>
                 </div>
 
-                {/* 로그아웃 */}
+                {/* 로그아웃 — onLogout 호출 시 App.jsx handleLogout이 localStorage까지 정리 */}
                 <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
                     <button
                         className="w-full flex items-center gap-2.5 px-4 py-3.5 bg-transparent border-none cursor-pointer text-left"
