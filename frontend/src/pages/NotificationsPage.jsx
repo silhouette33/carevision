@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { api } from '../api/client';
+import { useState } from 'react';
+import { store, useStore } from '../store';
 
 const CATEGORIES = [
     { id: 'all', label: '전체' },
@@ -67,34 +67,12 @@ function timeAgo(iso) {
     return `${d}일 전`;
 }
 
-export default function NotificationsPage({ onUnreadChange, onOpenEmergency }) {
+export default function NotificationsPage({ onOpenEmergency }) {
     const [cat, setCat] = useState('all');
-    const [items, setItems] = useState([]);
+    const items = useStore((s) => s.notifications);
 
-    useEffect(() => { fetchItems(); }, []);
-
-    const fetchItems = async () => {
-        try {
-            const data = await api.getNotifications();
-            setItems(data);
-        } catch {
-            setItems([]);
-        }
-    };
-
-    useEffect(() => {
-        onUnreadChange?.(items.filter((n) => !n.isRead).length);
-    }, [items]);
-
-    const markAll = async () => {
-        try { await api.markAllAsRead(); } catch {}
-        setItems((prev) => prev.map((n) => ({ ...n, isRead: true })));
-    };
-
-    const markOne = async (id) => {
-        try { await api.markAsRead(id); } catch {}
-        setItems((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
-    };
+    const markAll = () => store.markAllRead();
+    const markOne = (id) => store.markRead(id);
 
     const normalizedType = (n) => {
         const t = (n.type || 'NORMAL').toUpperCase();

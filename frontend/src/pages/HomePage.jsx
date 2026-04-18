@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api/client';
+import { useStore } from '../store';
 
 function OrangeHeader({ title, subtitle, rightSlot }) {
     return (
@@ -46,18 +46,17 @@ export default function HomePage({
     onOpenCamera,
     unreadCount,
 }) {
-    const [meds, setMeds] = useState([]);
-    const [logs, setLogs] = useState([]);
+    const meds = useStore((s) => (selectedPatient ? s.medications[selectedPatient.id] || [] : []));
+    const logs = useStore((s) => (selectedPatient ? s.logs[selectedPatient.id] || [] : []));
+    const detections = useStore((s) => s.detections);
 
-    useEffect(() => {
-        if (!selectedPatient) return;
-        api.getMedications(selectedPatient.id).then(setMeds);
-        api.getMedicationLogs(selectedPatient.id).then(setLogs);
-    }, [selectedPatient]);
+    const recentFall = detections.find(
+        (d) => d.type === 'FALL' && Date.now() - new Date(d.detectedAt).getTime() < 30 * 60 * 1000
+    );
 
     const sortedMeds = [...meds].sort((a, b) => a.scheduleTime.localeCompare(b.scheduleTime));
     const taken = logs.filter((l) => l.status === 'TAKEN').length;
-    const total = meds.length || 3;
+    const total = meds.length;
 
     const getMedStatus = (m) => {
         const log = logs.find((l) => l.medicationId === m.id);
@@ -120,16 +119,27 @@ export default function HomePage({
                 <div className="bg-white rounded-2xl p-4 shadow-sm">
                     <div className="flex justify-between items-center mb-1">
                         <h3 className="text-base font-bold text-gray-900 m-0">안전 상태</h3>
-                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#10B981]">
-                            <span className="w-2 h-2 rounded-full bg-[#10B981]" />
-                            정상
-                        </span>
+                        {recentFall ? (
+                            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#E53935]">
+                                <span className="w-2 h-2 rounded-full bg-[#E53935] animate-pulse" />
+                                위급
+                            </span>
+                        ) : (
+                            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#10B981]">
+                                <span className="w-2 h-2 rounded-full bg-[#10B981]" />
+                                정상
+                            </span>
+                        )}
                     </div>
-                    <p className="text-xs text-gray-500 mb-3">3분 전 정상 움직임 감지</p>
+                    <p className="text-xs text-gray-500 mb-3">
+                        {recentFall ? `${Math.floor((Date.now() - new Date(recentFall.detectedAt).getTime()) / 60000)}분 전 낙상 의심 감지` : '3분 전 정상 움직임 감지'}
+                    </p>
                     <div className="grid grid-cols-3 gap-2">
-                        <div className="bg-[#FFF4ED] rounded-xl py-2.5 text-center">
+                        <div className={`${recentFall ? 'bg-[#FFE5DB]' : 'bg-[#FFF4ED]'} rounded-xl py-2.5 text-center`}>
                             <p className="text-[11px] text-gray-500 m-0">낙상</p>
-                            <p className="text-sm font-semibold text-[#10B981] m-0">미감지</p>
+                            <p className={`text-sm font-semibold m-0 ${recentFall ? 'text-[#E53935]' : 'text-[#10B981]'}`}>
+                                {recentFall ? '감지' : '미감지'}
+                            </p>
                         </div>
                         <div className="bg-[#FFF7E8] rounded-xl py-2.5 text-center">
                             <p className="text-[11px] text-gray-500 m-0">무동작</p>
@@ -137,7 +147,7 @@ export default function HomePage({
                         </div>
                         <div className="bg-[#EEF4FF] rounded-xl py-2.5 text-center">
                             <p className="text-[11px] text-gray-500 m-0">복약</p>
-                            <p className="text-sm font-semibold text-[#4F7CFF] m-0">완료 {taken}/{total}</p>
+                            <p className="text-sm font-semibold text-[#4F7CFF] m-0">완료 {taken}/{total || 0}</p>
                         </div>
                     </div>
                 </div>

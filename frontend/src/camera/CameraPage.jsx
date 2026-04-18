@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { store } from '../store';
 
 const AI_URL = 'http://localhost:8000';
 const FRAME_INTERVAL_MS = 500; // 2 fps 정도로 전송 (MVP 가시성 확인 용)
@@ -190,11 +191,18 @@ function LiveDetectionView({ patient, onChangePatient }) {
                 drawOverlay(objs, w, h);
                 setLastLatency(Math.round(performance.now() - t0));
 
-                // 낙상 상태 변화 시 알림
+                // 낙상 상태 변화 시 알림 + store 기록
                 const newStatus = json.fall?.status;
                 if (newStatus && newStatus !== prevFallStatus.current) {
                     if (newStatus === 'emergency') {
                         pushAlert('danger', '🚨 낙상 감지! 위급 상황');
+                        // 전역 store에 기록 → 알림/이력에 반영
+                        store.recordDetection({
+                            type: 'FALL',
+                            confidence: json.fall?.confidence ?? 0.9,
+                            patient,
+                            extra: { location: '거실', source: 'camera' },
+                        });
                     } else if (newStatus === 'suspected') {
                         pushAlert('warn', '⚠️ 낙상 의심 자세');
                     }
@@ -206,10 +214,30 @@ function LiveDetectionView({ patient, onChangePatient }) {
                 }
                 prevMedCount.current = objs.length;
 
-                // 복약 완료 판정 순간 한 번만 토스트
+                // 복약 완료 판정 순간 한 번만 토스트 + store 기록
                 const takenNow = !!json.medication_score?.taken;
                 if (takenNow && !prevTaken.current) {
                     pushAlert('info', '✅ 복약 완료 확정!');
+                    store.recordDetection({
+                        type: 'MEDICATION',
+                        confidence: json.medication_score?.score ?? 0.8,
+                        patient,
+                        extra: { source: 'camera', status: 'taken' },
+                    });
+                    // 가장 가까운 복약 시간대의 스케줄에 TAKEN 로그 자동 기록
+                    const meds = store.getMedications(patient.id);
+                    if (meds.length > 0) {
+                        const nowH = new Date().getHours();
+                        const near = meds.reduce((best, m) => {
+                            const mh = parseInt((m.scheduleTime || '00:00').split(':')[0], 10);
+                            const diff = Math.abs(mh - nowH);
+                            if (!best || diff < best.diff) return { med: m, diff };
+                            return best;
+                        }, null);
+                        if (near && near.diff <= 3) {
+                            store.logMedication(patient.id, near.med.id, 'TAKEN');
+                        }
+                    }
                 }
                 prevTaken.current = takenNow;
             }
@@ -242,10 +270,10 @@ function LiveDetectionView({ patient, onChangePatient }) {
     return (
         <div className="min-h-screen bg-slate-100 max-w-[480px] mx-auto font-sans relative">
             {/* 헤더 */}
-            <div className="bg-red-600 px-4 pt-5 pb-4 flex justify-between items-center">
+            <div className="bg-[#FF6B3D] px-4 pt-5 pb-4 flex justify-between items-center">
                 <span className="text-white font-bold text-[17px]">🚨 실시간 모니터링</span>
                 <button
-                    className="bg-white text-red-600 border-none rounded-lg px-3 py-1.5 font-semibold cursor-pointer text-sm"
+                    className="bg-white text-[#FF6B3D] border-none rounded-lg px-3 py-1.5 font-semibold cursor-pointer text-sm"
                     onClick={onChangePatient}
                 >
                     환자 변경
@@ -326,7 +354,7 @@ function LiveDetectionView({ patient, onChangePatient }) {
                     {!streaming ? (
                         <button
                             onClick={startCamera}
-                            className="flex-1 bg-blue-600 text-white rounded-xl py-3 font-bold text-sm border-none cursor-pointer"
+                            className="flex-1 bg-[#FF6B3D] text-white rounded-xl py-3 font-bold text-sm border-none cursor-pointer"
                         >
                             ▶ 카메라 시작
                         </button>
@@ -344,6 +372,37 @@ function LiveDetectionView({ patient, onChangePatient }) {
                     >
                         🔄 리셋
                     </button>
+                </div>
+
+                {/* 수동 테스트 (AI 서버 없이 알림/기록 흐름 확인용) */}
+                <div className="mt-3 bg-white rounded-xl p-3 border border-dashed border-gray-300">
+                    <p className="text-[11px] font-semibold text-gray-500 m-0 mb-2">🧪 테스트용 시뮬레이션</p>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => store.recordDetection({
+                                type: 'FALL', confidence: 0.87, patient,
+                                extra: { location: '거실', source: 'manual' },
+                            })}
+                            className="flex-1 bg-[#E53935] text-white rounded-lg py-2 text-xs font-bold border-none cursor-pointer"
+                        >
+                            낙상 시뮬
+                        </button>
+                        <button
+                            onClick={() => {
+                                store.recordDetection({
+                                    type: 'MEDICATION', confidence: 0.92, patient,
+                                    extra: { source: 'manual', status: 'taken' },
+                                });
+                                const meds = store.getMedications(patient.id);
+                                if (meds.length > 0) {
+                                    store.logMedication(patient.id, meds[0].id, 'TAKEN');
+                                }
+                            }}
+                            className="flex-1 bg-[#10B981] text-white rounded-lg py-2 text-xs font-bold border-none cursor-pointer"
+                        >
+                            복약 시뮬
+                        </button>
+                    </div>
                 </div>
 
                 {/* 복약 완료 큰 배너 */}

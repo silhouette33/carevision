@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api/client';
+import { useStore } from '../store';
 
 function EmergencyDetail({ detection, patient, onBack, onOpenCamera }) {
-    const [elapsed, setElapsed] = useState(0);
+    const startAt = detection?.detectedAt || detection?.sentAt || new Date().toISOString();
+    const [elapsed, setElapsed] = useState(Math.floor((Date.now() - new Date(startAt).getTime()) / 1000));
 
     useEffect(() => {
         const t = setInterval(() => setElapsed((e) => e + 1), 1000);
@@ -12,7 +13,7 @@ function EmergencyDetail({ detection, patient, onBack, onOpenCamera }) {
     const min = Math.floor(elapsed / 60);
     const sec = elapsed % 60;
     const confidence = Math.round((detection?.confidence ?? 0.874) * 100 * 10) / 10;
-    const time = new Date(detection?.detectedAt ?? Date.now()).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+    const time = new Date(startAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
 
     return (
         <div className="min-h-screen">
@@ -110,14 +111,12 @@ function EmergencyDetail({ detection, patient, onBack, onOpenCamera }) {
 }
 
 export default function HistoryPage({ patient, focus, onClearFocus, onOpenCamera }) {
-    const [detections, setDetections] = useState([]);
+    const allDetections = useStore((s) => s.detections);
+    const detections = patient
+        ? allDetections.filter((d) => !d.patient || d.patient.id === patient.id)
+        : allDetections;
     const [view, setView] = useState(focus ? 'detail' : 'list');
     const [current, setCurrent] = useState(focus || null);
-
-    useEffect(() => {
-        if (!patient) return;
-        api.getDetections(patient.id).then(setDetections);
-    }, [patient]);
 
     useEffect(() => {
         if (focus) {
@@ -127,9 +126,17 @@ export default function HistoryPage({ patient, focus, onClearFocus, onOpenCamera
     }, [focus]);
 
     if (view === 'detail') {
+        // notification이 focus된 경우 가장 최근의 같은 타입 detection을 매핑
+        const matchedDetection = current?.detectedAt
+            ? current
+            : allDetections.find((d) =>
+                  d.type === (current?.type || 'FALL') &&
+                  Math.abs(new Date(d.detectedAt).getTime() - new Date(current?.sentAt || 0).getTime()) < 60000
+              ) || current;
+
         return (
             <EmergencyDetail
-                detection={current}
+                detection={matchedDetection}
                 patient={patient}
                 onBack={() => { setView('list'); onClearFocus?.(); }}
                 onOpenCamera={onOpenCamera}

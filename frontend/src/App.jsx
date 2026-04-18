@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { api } from './api/client';
+import { store, useStore } from './store';
 import HomePage from './pages/HomePage';
 import MedicationPage from './pages/MedicationPage';
 import NotificationsPage from './pages/NotificationsPage';
@@ -70,6 +71,44 @@ function NavIcon({ name, active }) {
     }
 }
 
+// 상단 플로팅 토스트
+function Toast({ notification, onClose, onOpen }) {
+    const isFall = notification.type === 'FALL';
+    return (
+        <div
+            className={`${isFall ? 'bg-[#E53935]' : 'bg-[#FF6B3D]'} text-white rounded-2xl p-3 shadow-lg flex items-center gap-3 cursor-pointer animate-[slideDown_0.3s_ease-out]`}
+            onClick={() => { onOpen(notification); onClose(); }}
+        >
+            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                {isFall ? (
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                        <path d="M12 2L2 22h20L12 2z" stroke="white" strokeWidth="2" strokeLinejoin="round"/>
+                        <line x1="12" y1="10" x2="12" y2="15" stroke="white" strokeWidth="2" strokeLinecap="round"/>
+                        <circle cx="12" cy="18" r="1" fill="white"/>
+                    </svg>
+                ) : (
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                        <rect x="2" y="8" width="20" height="8" rx="4" stroke="white" strokeWidth="2"/>
+                        <line x1="12" y1="8" x2="12" y2="16" stroke="white" strokeWidth="2"/>
+                    </svg>
+                )}
+            </div>
+            <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold m-0">
+                    {isFall ? '낙상 의심 감지!' : '복약 감지됨'}
+                </p>
+                <p className="text-xs m-0 mt-0.5 opacity-90 truncate">{notification.message}</p>
+            </div>
+            <button
+                onClick={(e) => { e.stopPropagation(); onClose(); }}
+                className="text-white/80 text-lg bg-transparent border-none cursor-pointer"
+            >
+                ×
+            </button>
+        </div>
+    );
+}
+
 export default function App() {
     const [user, setUser] = useState(null);
     const [page, setPage] = useState('home');
@@ -77,7 +116,31 @@ export default function App() {
     const [selectedPatient, setSelectedPatient] = useState(null);
     const [cameraMode, setCameraMode] = useState(false);
     const [historyFocus, setHistoryFocus] = useState(null);
-    const [unreadCount, setUnreadCount] = useState(0);
+    const [toasts, setToasts] = useState([]);
+    const lastSeenNotifId = useRef(0);
+
+    const notifications = useStore((s) => s.notifications);
+    const unreadCount = notifications.filter((n) => !n.isRead).length;
+
+    // 새 알림이 추가되면 토스트 띄우기
+    useEffect(() => {
+        if (notifications.length === 0) return;
+        const newest = notifications[0];
+        if (!newest.isRead && newest.id !== lastSeenNotifId.current) {
+            // 첫 렌더 때는 이미 읽음 처리됐을 수도 있으므로 '최근 5초 이내' 알림만 토스트
+            const age = Date.now() - new Date(newest.sentAt).getTime();
+            if (age < 5000 && lastSeenNotifId.current !== 0) {
+                const id = newest.id;
+                setToasts((prev) => [newest, ...prev.filter((t) => t.id !== id)]);
+                setTimeout(() => {
+                    setToasts((prev) => prev.filter((t) => t.id !== id));
+                }, 6000);
+            }
+            lastSeenNotifId.current = newest.id;
+        } else if (lastSeenNotifId.current === 0) {
+            lastSeenNotifId.current = newest.id;
+        }
+    }, [notifications]);
 
     useEffect(() => {
         if (user) {
@@ -89,20 +152,43 @@ export default function App() {
                 setPatients(all);
                 if (!selectedPatient) setSelectedPatient(all[0] || null);
             });
-            api.getUnreadCount().then((r) => setUnreadCount(r.count || 0));
         }
     }, [user]);
 
     if (!user) return <LoginPage onLogin={setUser} />;
 
+    const handleOpenNotification = (n) => {
+        store.markRead(n.id);
+        if (n.type === 'FALL') {
+            setHistoryFocus(n);
+            setPage('history');
+        } else {
+            setPage('notifications');
+        }
+    };
+
     if (cameraMode) {
         return (
-            <CameraPage
-                patient={selectedPatient}
-                patients={patients}
-                onSelectPatient={setSelectedPatient}
-                onClose={() => setCameraMode(false)}
-            />
+            <>
+                <CameraPage
+                    patient={selectedPatient}
+                    patients={patients}
+                    onSelectPatient={setSelectedPatient}
+                    onClose={() => setCameraMode(false)}
+                />
+                {toasts.length > 0 && (
+                    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] flex flex-col gap-2 w-[92%] max-w-[460px]">
+                        {toasts.map((t) => (
+                            <Toast
+                                key={t.id}
+                                notification={t}
+                                onClose={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
+                                onOpen={handleOpenNotification}
+                            />
+                        ))}
+                    </div>
+                )}
+            </>
         );
     }
 
@@ -119,7 +205,6 @@ export default function App() {
         if (page === 'notifications') {
             return (
                 <NotificationsPage
-                    onUnreadChange={setUnreadCount}
                     onOpenEmergency={(n) => { setHistoryFocus(n); setPage('history'); }}
                 />
             );
@@ -160,6 +245,20 @@ export default function App() {
     return (
         <div className="min-h-screen bg-[#F7F7F7] max-w-[480px] mx-auto relative font-sans">
             <div className="pb-[72px]">{renderPage()}</div>
+
+            {/* 토스트 */}
+            {toasts.length > 0 && (
+                <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] flex flex-col gap-2 w-[92%] max-w-[460px]">
+                    {toasts.map((t) => (
+                        <Toast
+                            key={t.id}
+                            notification={t}
+                            onClose={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
+                            onOpen={handleOpenNotification}
+                        />
+                    ))}
+                </div>
+            )}
 
             {/* 하단 고정 네비 */}
             <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[480px] bg-white border-t border-gray-200 flex justify-around items-stretch pt-2 pb-2 shadow-[0_-2px_12px_rgba(0,0,0,0.05)] z-40">

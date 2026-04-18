@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { api } from '../api/client';
+import { useState } from 'react';
+import { store, useStore } from '../store';
 
 const MEAL = (t) => {
     const h = parseInt(t?.split(':')[0] || '0', 10);
@@ -9,32 +9,146 @@ const MEAL = (t) => {
     return '밤';
 };
 
+const DAYS_KR = { MON: '월', TUE: '화', WED: '수', THU: '목', FRI: '금', SAT: '토', SUN: '일' };
+const ALL_DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+
+function MedicationFormModal({ onClose, onSubmit, initial }) {
+    const [form, setForm] = useState(
+        initial || { name: '', dosage: '1정', scheduleTime: '08:00', days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] }
+    );
+
+    const toggleDay = (d) =>
+        setForm((f) => ({
+            ...f,
+            days: f.days.includes(d) ? f.days.filter((x) => x !== d) : [...f.days, d],
+        }));
+
+    const submit = () => {
+        if (!form.name.trim()) return alert('약 이름을 입력해주세요');
+        if (form.days.length === 0) return alert('요일을 하나 이상 선택해주세요');
+        onSubmit({ ...form, days: form.days.join(',') });
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/50 z-[70] flex items-end justify-center">
+            <div className="w-full max-w-[480px] bg-white rounded-t-3xl p-5 pb-8 animate-[slideUp_0.25s_ease-out]">
+                <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-lg font-bold text-gray-900 m-0">복약 스케줄 추가</h2>
+                    <button
+                        onClick={onClose}
+                        className="text-2xl text-gray-400 bg-transparent border-none cursor-pointer leading-none"
+                    >
+                        ×
+                    </button>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                    <div>
+                        <label className="text-xs font-semibold text-gray-600 mb-1 block">약 이름</label>
+                        <input
+                            className="w-full px-3 py-3 border border-gray-200 rounded-xl text-sm outline-none bg-gray-50 focus:border-[#FF6B3D] focus:ring-2 focus:ring-[#FFE5DB]"
+                            placeholder="예: 혈압약"
+                            value={form.name}
+                            onChange={(e) => setForm({ ...form, name: e.target.value })}
+                        />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className="text-xs font-semibold text-gray-600 mb-1 block">용량</label>
+                            <input
+                                className="w-full px-3 py-3 border border-gray-200 rounded-xl text-sm outline-none bg-gray-50 focus:border-[#FF6B3D] focus:ring-2 focus:ring-[#FFE5DB]"
+                                placeholder="1정"
+                                value={form.dosage}
+                                onChange={(e) => setForm({ ...form, dosage: e.target.value })}
+                            />
+                        </div>
+                        <div>
+                            <label className="text-xs font-semibold text-gray-600 mb-1 block">복용 시각</label>
+                            <input
+                                type="time"
+                                className="w-full px-3 py-3 border border-gray-200 rounded-xl text-sm outline-none bg-gray-50 focus:border-[#FF6B3D] focus:ring-2 focus:ring-[#FFE5DB]"
+                                value={form.scheduleTime}
+                                onChange={(e) => setForm({ ...form, scheduleTime: e.target.value })}
+                            />
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-xs font-semibold text-gray-600 mb-1 block">복용 요일</label>
+                        <div className="flex gap-1.5 flex-wrap">
+                            {ALL_DAYS.map((d) => (
+                                <button
+                                    key={d}
+                                    onClick={() => toggleDay(d)}
+                                    className={`w-10 h-10 rounded-full text-sm font-bold border cursor-pointer transition-colors ${
+                                        form.days.includes(d)
+                                            ? 'bg-[#FF6B3D] text-white border-[#FF6B3D]'
+                                            : 'bg-white text-gray-500 border-gray-200'
+                                    }`}
+                                >
+                                    {DAYS_KR[d]}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <button
+                        onClick={submit}
+                        className="mt-3 w-full bg-[#FF6B3D] text-white rounded-xl py-3.5 font-bold text-sm border-none cursor-pointer"
+                    >
+                        추가하기
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export default function MedicationPage({ patient, patients, onSelectPatient }) {
     const [tab, setTab] = useState('today');
-    const [meds, setMeds] = useState([]);
-    const [logs, setLogs] = useState([]);
+    const [showForm, setShowForm] = useState(false);
     const [showPatientList, setShowPatientList] = useState(false);
 
-    useEffect(() => {
-        if (!patient) return;
-        api.getMedications(patient.id).then(setMeds);
-        api.getMedicationLogs(patient.id).then(setLogs);
-    }, [patient]);
+    const medications = useStore((s) => (patient ? s.medications[patient.id] || [] : []));
+    const logs = useStore((s) => (patient ? s.logs[patient.id] || [] : []));
 
-    const sorted = [...meds].sort((a, b) => a.scheduleTime.localeCompare(b.scheduleTime));
+    const sorted = [...medications].sort((a, b) => a.scheduleTime.localeCompare(b.scheduleTime));
     const taken = logs.filter((l) => l.status === 'TAKEN').length;
-    const total = meds.length || 3;
+    const total = medications.length;
     const pct = total > 0 ? (taken / total) * 100 : 0;
 
-    const getStatus = (m, idx) => {
+    const getStatus = (m) => {
         const log = logs.find((l) => l.medicationId === m.id);
         if (log?.status === 'TAKEN') {
-            return { label: idx === 0 ? 'AI 감지' : '수동 체크', tone: idx === 0 ? 'bg-[#E8F8F0] text-[#10B981]' : 'bg-[#EEF4FF] text-[#4F7CFF]', line: `${m.scheduleTime} 예정 · ${idx === 0 ? '08:03' : '12:17'} ${idx === 0 ? '감지됨' : '기록'}`, dotColor: 'bg-[#10B981]' };
+            const at = new Date(log.loggedAt);
+            const hh = String(at.getHours()).padStart(2, '0');
+            const mm = String(at.getMinutes()).padStart(2, '0');
+            return {
+                label: log.source === 'manual' ? '수동 체크' : 'AI 감지',
+                tone: 'bg-[#E8F8F0] text-[#10B981]',
+                line: `${m.scheduleTime} 예정 · ${hh}:${mm} 감지됨`,
+                dotColor: 'bg-[#10B981]',
+            };
         }
         if (log?.status === 'MISSED') {
             return { label: '누락', tone: 'bg-red-50 text-red-600', line: `${m.scheduleTime} 예정`, dotColor: 'bg-red-500' };
         }
         return { label: '대기중', tone: 'bg-[#FFE5DB] text-[#FF6B3D]', line: `${m.scheduleTime} 예정`, dotColor: 'bg-gray-300' };
+    };
+
+    const handleAdd = async (data) => {
+        if (!patient) return;
+        await store.addMedication(patient.id, data);
+        setShowForm(false);
+    };
+
+    const handleDelete = (medId) => {
+        if (!patient) return;
+        if (!confirm('이 스케줄을 삭제하시겠습니까?')) return;
+        store.deleteMedication(patient.id, medId);
+    };
+
+    const handleManualCheck = (medId) => {
+        if (!patient) return;
+        store.logMedication(patient.id, medId, 'TAKEN');
     };
 
     return (
@@ -51,7 +165,10 @@ export default function MedicationPage({ patient, patients, onSelectPatient }) {
                             {patient?.name} 님 ▾
                         </button>
                     </div>
-                    <button className="bg-white/25 border-none text-white text-sm font-semibold rounded-full px-4 py-1.5 cursor-pointer">
+                    <button
+                        onClick={() => setShowForm(true)}
+                        className="bg-white/25 border-none text-white text-sm font-semibold rounded-full px-4 py-1.5 cursor-pointer"
+                    >
                         + 추가
                     </button>
                 </div>
@@ -99,7 +216,9 @@ export default function MedicationPage({ patient, patients, onSelectPatient }) {
                 <div className="bg-white rounded-2xl p-4 shadow-sm">
                     <div className="flex justify-between items-center mb-2">
                         <h3 className="text-base font-bold text-gray-900 m-0">오늘 복약 현황</h3>
-                        <span className="text-[#FF6B3D] text-base font-bold">{taken}/{total}</span>
+                        <span className="text-[#FF6B3D] text-base font-bold">
+                            {taken}/{total || 0}
+                        </span>
                     </div>
                     <div className="h-2 bg-gray-100 rounded-full overflow-hidden mb-2">
                         <div
@@ -109,21 +228,31 @@ export default function MedicationPage({ patient, patients, onSelectPatient }) {
                     </div>
                     <div className="flex justify-between text-xs">
                         <span className="text-[#10B981] font-semibold">완료 {taken}회</span>
-                        <span className="text-gray-400">잔여 {total - taken}회</span>
+                        <span className="text-gray-400">잔여 {Math.max(0, total - taken)}회</span>
                     </div>
                 </div>
             </div>
 
-            {/* 복약 타임라인 */}
+            {/* 복약 타임라인 / 전체 스케줄 */}
             <div className="px-4 mb-4">
                 <div className="bg-white rounded-2xl p-4 shadow-sm">
-                    <h3 className="text-base font-bold text-gray-900 mb-3">복약 타임라인</h3>
+                    <h3 className="text-base font-bold text-gray-900 mb-3">
+                        {tab === 'today' ? '복약 타임라인' : '전체 스케줄'}
+                    </h3>
                     <div className="flex flex-col">
                         {sorted.length === 0 && (
-                            <p className="text-sm text-gray-400 py-4 text-center">등록된 복약 스케줄이 없습니다</p>
+                            <div className="text-center py-8">
+                                <p className="text-sm text-gray-400 mb-3">등록된 복약 스케줄이 없습니다</p>
+                                <button
+                                    onClick={() => setShowForm(true)}
+                                    className="px-4 py-2 bg-[#FF6B3D] text-white text-sm font-semibold rounded-xl border-none cursor-pointer"
+                                >
+                                    + 첫 스케줄 추가
+                                </button>
+                            </div>
                         )}
-                        {sorted.map((m, i) => {
-                            const s = getStatus(m, i);
+                        {tab === 'today' && sorted.map((m) => {
+                            const s = getStatus(m);
                             return (
                                 <div key={m.id} className="flex items-start gap-3 py-3 border-b last:border-0 border-gray-100">
                                     <span className={`w-2.5 h-2.5 rounded-full mt-1.5 ${s.dotColor}`} />
@@ -136,9 +265,14 @@ export default function MedicationPage({ patient, patients, onSelectPatient }) {
                                                 {s.label}
                                             </span>
                                         </div>
-                                        <p className="text-xs text-gray-500 m-0 mt-1">{s.line}</p>
+                                        <p className="text-xs text-gray-500 m-0 mt-1">
+                                            {s.line} · {m.dosage}
+                                        </p>
                                         {s.label === '대기중' && (
-                                            <button className="mt-2 text-xs text-[#FF6B3D] font-semibold bg-transparent border-none cursor-pointer">
+                                            <button
+                                                onClick={() => handleManualCheck(m.id)}
+                                                className="mt-2 text-xs text-[#FF6B3D] font-semibold bg-transparent border-none cursor-pointer"
+                                            >
                                                 수동으로 완료 처리 체크 ›
                                             </button>
                                         )}
@@ -146,6 +280,24 @@ export default function MedicationPage({ patient, patients, onSelectPatient }) {
                                 </div>
                             );
                         })}
+                        {tab === 'all' && sorted.map((m) => (
+                            <div key={m.id} className="flex items-center gap-3 py-3 border-b last:border-0 border-gray-100">
+                                <div className="w-12 text-sm font-bold text-[#FF6B3D]">{m.scheduleTime}</div>
+                                <div className="flex-1">
+                                    <p className="text-sm font-semibold text-gray-900 m-0">{m.name}</p>
+                                    <p className="text-xs text-gray-500 m-0 mt-0.5">
+                                        {m.dosage} ·{' '}
+                                        {m.days?.split(',').map((d) => DAYS_KR[d]).join(' ')}
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => handleDelete(m.id)}
+                                    className="text-xs text-red-500 bg-transparent border-none cursor-pointer"
+                                >
+                                    삭제
+                                </button>
+                            </div>
+                        ))}
                     </div>
                 </div>
             </div>
@@ -161,10 +313,17 @@ export default function MedicationPage({ patient, patients, onSelectPatient }) {
                     </div>
                     <div>
                         <p className="text-sm font-bold text-gray-900 m-0">AI 복약 감지 활성화됨</p>
-                        <p className="text-xs text-gray-500 m-0 mt-0.5">19:50~20:10 카메라 모니터링 예정</p>
+                        <p className="text-xs text-gray-500 m-0 mt-0.5">홈 → LIVE 모니터링으로 바로 감지</p>
                     </div>
                 </div>
             </div>
+
+            {showForm && (
+                <MedicationFormModal
+                    onClose={() => setShowForm(false)}
+                    onSubmit={handleAdd}
+                />
+            )}
         </div>
     );
 }

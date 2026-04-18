@@ -94,6 +94,9 @@ export const api = {
   getDetections: (patientId) =>
       useMock(() => request('GET', `/detections?patientId=${patientId}`), MOCK.detections),
 
+  createDetection: (body) =>
+      useMock(() => request('POST', '/detections', body), { ...body, id: Date.now(), detectedAt: new Date().toISOString() }),
+
   // 알림
   getNotifications: () =>
       useMock(() => request('GET', '/notifications'), MOCK.notifications),
