@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { store } from '../store';
 
-const AI_URL = 'http://localhost:8000';
+const AI_URL = import.meta.env.VITE_AI_BASE_URL || 'http://localhost:8000';
 const FRAME_INTERVAL_MS = 500; // 2 fps 정도로 전송 (MVP 가시성 확인 용)
 
 export default function CameraPage({ patient, patients = [], onSelectPatient, onClose }) {

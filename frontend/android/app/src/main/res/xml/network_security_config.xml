@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 개발 환경: 로컬 IP / 내부망 HTTP 허용. 배포 시에는 HTTPS 도메인만 허용으로 바꿀 것. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
