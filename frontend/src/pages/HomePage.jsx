@@ -55,11 +55,19 @@ export default function HomePage({
     );
 
     const sortedMeds = [...meds].sort((a, b) => a.scheduleTime.localeCompare(b.scheduleTime));
-    const taken = logs.filter((l) => l.status === 'TAKEN').length;
+
+    const todayStr = (() => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    })();
+
+    const taken = logs.filter((l) => l.status === 'TAKEN' && l.loggedAt?.slice(0, 10) === todayStr).length;
     const total = meds.length;
 
     const getMedStatus = (m) => {
-        const log = logs.find((l) => l.medicationId === m.id);
+        const log = [...logs]
+            .filter((l) => l.medicationId === m.id && l.loggedAt?.slice(0, 10) === todayStr)
+            .sort((a, b) => new Date(b.loggedAt) - new Date(a.loggedAt))[0];
         if (log?.status === 'TAKEN') return { label: '완료', color: 'text-[#10B981] bg-[#E8F8F0]' };
         if (log?.status === 'MISSED') return { label: '누락', color: 'text-red-600 bg-red-50' };
         return { label: '대기', color: 'text-[#FF6B3D] bg-[#FFE5DB]' };

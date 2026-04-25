@@ -111,12 +111,22 @@ export default function MedicationPage({ patient, patients, onSelectPatient }) {
     const logs = useStore((s) => (patient ? s.logs[patient.id] || [] : []));
 
     const sorted = [...medications].sort((a, b) => a.scheduleTime.localeCompare(b.scheduleTime));
-    const taken = logs.filter((l) => l.status === 'TAKEN').length;
+
+    const todayStr = () => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    const today = todayStr();
+
+    const taken = logs.filter((l) => l.status === 'TAKEN' && l.loggedAt?.slice(0, 10) === today).length;
     const total = medications.length;
     const pct = total > 0 ? (taken / total) * 100 : 0;
 
     const getStatus = (m) => {
-        const log = logs.find((l) => l.medicationId === m.id);
+        // 오늘 날짜 로그만 검색, 최신 순
+        const log = [...logs]
+            .filter((l) => l.medicationId === m.id && l.loggedAt?.slice(0, 10) === today)
+            .sort((a, b) => new Date(b.loggedAt) - new Date(a.loggedAt))[0];
         if (log?.status === 'TAKEN') {
             const at = new Date(log.loggedAt);
             const hh = String(at.getHours()).padStart(2, '0');

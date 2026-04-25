@@ -169,13 +169,16 @@ export default function App() {
 
     if (cameraMode) {
         return (
-            <>
-                <CameraPage
-                    patient={selectedPatient}
-                    patients={patients}
-                    onSelectPatient={setSelectedPatient}
-                    onClose={() => setCameraMode(false)}
-                />
+            <div className="min-h-screen bg-[#F7F7F7] max-w-[480px] mx-auto relative font-sans">
+                <div className="pb-[72px]">
+                    <CameraPage
+                        patient={selectedPatient}
+                        patients={patients}
+                        onSelectPatient={setSelectedPatient}
+                        onClose={() => setCameraMode(false)}
+                    />
+                </div>
+
                 {toasts.length > 0 && (
                     <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] flex flex-col gap-2 w-[92%] max-w-[460px]">
                         {toasts.map((t) => (
@@ -188,7 +191,20 @@ export default function App() {
                         ))}
                     </div>
                 )}
-            </>
+
+                <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[480px] bg-white border-t border-gray-200 flex justify-around items-stretch pt-2 pb-2 shadow-[0_-2px_12px_rgba(0,0,0,0.05)] z-40">
+                    {NAV_ITEMS.map((tab) => (
+                        <button
+                            key={tab.id}
+                            className="flex flex-col items-center justify-end bg-transparent border-none cursor-pointer px-2 py-1 gap-0.5 relative flex-1"
+                            onClick={() => { setCameraMode(false); setPage(tab.id); setHistoryFocus(null); }}
+                        >
+                            <NavIcon name={tab.icon} active={false} />
+                            <span className="text-[11px] font-medium mt-0.5 text-gray-400">{tab.label}</span>
+                        </button>
+                    ))}
+                </nav>
+            </div>
         );
     }
 
