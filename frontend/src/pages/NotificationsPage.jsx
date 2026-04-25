@@ -1,134 +1,197 @@
-import { useState, useEffect } from 'react';
-import { api } from '../api/client';
+import { useState } from 'react';
+import { store, useStore } from '../store';
 
-const TYPE_LABEL = {
-  FALL:       { text: '낙상 감지', icon: '🚨', badgeBg: 'bg-red-100',   badgeText: 'text-red-600',   iconBg: 'bg-red-100' },
-  MEDICATION: { text: '복약 알림', icon: '💊', badgeBg: 'bg-amber-100', badgeText: 'text-amber-600', iconBg: 'bg-amber-100' },
-  NORMAL:     { text: '정상',     icon: '✅', badgeBg: 'bg-green-100', badgeText: 'text-green-600', iconBg: 'bg-green-100' },
+const CATEGORIES = [
+    { id: 'all', label: '전체' },
+    { id: 'emergency', label: '응급' },
+    { id: 'medication', label: '복약' },
+    { id: 'system', label: '시스템' },
+];
+
+const TYPE_META = {
+    FALL: {
+        category: 'emergency',
+        title: '낙상 의심 감지됨',
+        iconBg: 'bg-[#FFE5DB]',
+        icon: (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2L2 22h20L12 2z" stroke="#FF6B3D" strokeWidth="2" strokeLinejoin="round" fill="#FFE5DB"/>
+                <line x1="12" y1="10" x2="12" y2="15" stroke="#FF6B3D" strokeWidth="2" strokeLinecap="round"/>
+                <circle cx="12" cy="18" r="1" fill="#FF6B3D"/>
+            </svg>
+        ),
+    },
+    MEDICATION: {
+        category: 'medication',
+        title: '복약 완료 확인',
+        iconBg: 'bg-[#FFE5DB]',
+        icon: (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <rect x="2" y="8" width="20" height="8" rx="4" stroke="#FF6B3D" strokeWidth="2"/>
+                <line x1="12" y1="8" x2="12" y2="16" stroke="#FF6B3D" strokeWidth="2"/>
+            </svg>
+        ),
+    },
+    NORMAL: {
+        category: 'system',
+        title: '정상 동작',
+        iconBg: 'bg-[#E8F8F0]',
+        icon: (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="9" stroke="#10B981" strokeWidth="2" fill="#E8F8F0"/>
+                <path d="M8 12l3 3 5-6" stroke="#10B981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+        ),
+    },
+    SYSTEM: {
+        category: 'system',
+        title: '시스템',
+        iconBg: 'bg-[#EEF4FF]',
+        icon: (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <rect x="3" y="5" width="18" height="12" rx="2" stroke="#4F7CFF" strokeWidth="2" fill="#EEF4FF"/>
+                <circle cx="18" cy="11" r="1" fill="#4F7CFF"/>
+            </svg>
+        ),
+    },
 };
 
-export default function NotificationsPage({ onBack }) {
-  const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+function timeAgo(iso) {
+    const diff = Date.now() - new Date(iso).getTime();
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return '방금 전';
+    if (m < 60) return `${m}분 전`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}시간 전`;
+    const d = Math.floor(h / 24);
+    return `${d}일 전`;
+}
 
-  useEffect(() => { fetchNotifications(); }, []);
+export default function NotificationsPage({ onOpenEmergency }) {
+    const [cat, setCat] = useState('all');
+    const items = useStore((s) => s.notifications);
 
-  const MOCK_NOTIFICATIONS = [
-    { id: 1, type: 'FALL', message: '김순자 어르신의 낙상이 감지되었습니다. 즉시 확인해주세요.', isRead: false, sentAt: new Date(Date.now() - 600000).toISOString(), patient: { name: '김순자' } },
-    { id: 2, type: 'MEDICATION', message: '이복순 어르신의 점심 복약(당뇨약)이 누락되었습니다.', isRead: false, sentAt: new Date(Date.now() - 3600000).toISOString(), patient: { name: '이복순' } },
-    { id: 3, type: 'MEDICATION', message: '김순자 어르신의 아침 복약(혈압약)이 완료되었습니다.', isRead: true, sentAt: new Date(Date.now() - 21600000).toISOString(), patient: { name: '김순자' } },
-    { id: 4, type: 'FALL', message: '박명수 어르신의 낙상 의심 동작이 감지되었습니다.', isRead: true, sentAt: new Date(Date.now() - 86400000).toISOString(), patient: { name: '박명수' } },
-  ];
+    const markAll = () => store.markAllRead();
+    const markOne = (id) => store.markRead(id);
 
-  const fetchNotifications = async () => {
-    try {
-      const data = await api.getNotifications();
-      setNotifications(data);
-    } catch (err) {
-      // 목업 데이터로 대체 (API 미연결 시)
-      setNotifications(MOCK_NOTIFICATIONS);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const normalizedType = (n) => {
+        const t = (n.type || 'NORMAL').toUpperCase();
+        return TYPE_META[t] ? t : 'NORMAL';
+    };
 
-  const handleMarkAll = async () => {
-    try {
-      await api.markAllAsRead();
-      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
-    } catch (err) {
-      setError(err.message);
-    }
-  };
+    const filtered = cat === 'all'
+        ? items
+        : items.filter((n) => TYPE_META[normalizedType(n)].category === cat);
 
-  const handleMarkOne = async (id) => {
-    try {
-      await api.markAsRead(id);
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
-    } catch (err) {
-      setError(err.message);
-    }
-  };
+    const unreadEmergency = items.find((n) => !n.isRead && normalizedType(n) === 'FALL');
 
-  const unreadCount = notifications.filter(n => !n.isRead).length;
+    const formatMessage = (n) => {
+        const t = normalizedType(n);
+        const patient = n.patient?.name;
+        if (t === 'FALL') return `${patient ?? ''} 님 거실에서 낙상 패턴이 감지되었습니다. 즉시 확인해주세요.`;
+        if (t === 'MEDICATION') return n.message || `${patient ?? ''} 님 복약이 완료되었습니다.`;
+        return n.message || '알림';
+    };
 
-  return (
-      <div className="min-h-screen bg-slate-100 max-w-[480px] mx-auto font-sans">
+    return (
+        <div className="min-h-screen">
+            {/* 헤더 */}
+            <div className="bg-[#FF6B3D] text-white px-5 pt-6 pb-7 rounded-b-3xl">
+                <div className="flex justify-between items-center">
+                    <h1 className="text-2xl font-bold m-0">알림</h1>
+                    <button
+                        onClick={markAll}
+                        className="bg-transparent border-none text-white text-sm font-semibold cursor-pointer"
+                    >
+                        모두 읽음
+                    </button>
+                </div>
+            </div>
 
-        {/* 헤더 */}
-        <div className="bg-white px-4 pt-4 pb-3 border-b border-gray-200 shadow-sm">
+            {/* 카테고리 탭 */}
+            <div className="px-4 -mt-4 mb-3">
+                <div className="bg-white rounded-full p-1 shadow-sm flex">
+                    {CATEGORIES.map((c) => (
+                        <button
+                            key={c.id}
+                            onClick={() => setCat(c.id)}
+                            className={`flex-1 py-1.5 rounded-full text-xs font-semibold border-none cursor-pointer transition-colors ${
+                                cat === c.id ? 'bg-[#FF6B3D] text-white' : 'bg-transparent text-gray-500'
+                            }`}
+                        >
+                            {c.label}
+                        </button>
+                    ))}
+                </div>
+            </div>
 
+            {/* 리스트 */}
+            <div className="px-4 flex flex-col">
+                {filtered.length === 0 && (
+                    <p className="text-center text-sm text-gray-400 py-10">알림이 없습니다</p>
+                )}
+                {filtered.map((n) => {
+                    const t = normalizedType(n);
+                    const meta = TYPE_META[t];
+                    const title = t === 'FALL'
+                        ? '낙상 의심 감지됨'
+                        : t === 'MEDICATION'
+                            ? (n.message?.includes('완료') ? '복약 완료 확인' : '복약 누락 알림')
+                            : meta.title;
 
-          <div className="flex justify-between items-center">
-            <span className="text-[17px] font-bold text-gray-900">🔔 알림</span>
-            {unreadCount > 0 && (
-                <button
-                    className="px-3 py-1 bg-gray-100 border border-gray-300 rounded-md text-[11px] text-gray-700 font-semibold cursor-pointer"
-                    onClick={handleMarkAll}
-                >
-                  전체 읽음 ({unreadCount})
-                </button>
-            )}
-          </div>
-        </div>
-
-        {/* 컨텐츠 */}
-        <div className="p-3">
-          {error && <p className="text-red-500 text-xs mb-2">{error}</p>}
-
-          {loading ? (
-              <p className="text-gray-400 text-sm text-center pt-10">불러오는 중...</p>
-          ) : notifications.length === 0 ? (
-              <div className="text-center py-12 bg-white rounded-xl shadow-sm">
-                <p className="text-4xl mb-2">🔕</p>
-                <p className="text-sm font-semibold text-gray-500">알림이 없습니다.</p>
-              </div>
-          ) : (
-              <div className="flex flex-col gap-2">
-                {notifications.map(n => {
-                  const type = TYPE_LABEL[n.type] || TYPE_LABEL['NORMAL'];
-                  return (
-                      <div
-                          key={n.id}
-                          className={`flex gap-3 p-3 rounded-xl border shadow-sm transition-opacity
-                                        ${n.isRead
-                              ? 'bg-gray-50 border-gray-100 opacity-60 cursor-default'
-                              : 'bg-white border-gray-200 cursor-pointer'
-                          }`}
-                          onClick={() => !n.isRead && handleMarkOne(n.id)}
-                      >
-                        {/* 타입 아이콘 */}
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${type.iconBg}`}>
-                          <span className="text-lg">{type.icon}</span>
-                        </div>
-
-                        {/* 본문 */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${type.badgeBg} ${type.badgeText}`}>
-                                                {type.text}
-                                            </span>
-                            {n.patient && (
-                                <span className="text-[10px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
-                                                    {n.patient.name}
-                                                </span>
-                            )}
-                            {!n.isRead && (
-                                <span className="w-2 h-2 rounded-full bg-blue-500 ml-auto shrink-0" />
-                            )}
-                          </div>
-                          <p className="text-xs text-gray-700 mb-0.5 leading-snug">{n.message}</p>
-                          <p className="text-[10px] text-gray-400">
-                            {new Date(n.sentAt).toLocaleString('ko-KR')}
-                          </p>
-                        </div>
-                      </div>
-                  );
+                    return (
+                        <button
+                            key={n.id}
+                            onClick={() => { markOne(n.id); }}
+                            className="text-left bg-transparent border-none cursor-pointer py-3 border-b border-gray-100 last:border-0 flex gap-3"
+                        >
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${meta.iconBg}`}>
+                                {meta.icon}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <div className="flex justify-between items-start gap-2">
+                                    <p className="text-sm font-bold text-gray-900 m-0">{title}</p>
+                                    {!n.isRead && (
+                                        <span className="w-2 h-2 rounded-full bg-[#FF6B3D] mt-1.5 shrink-0" />
+                                    )}
+                                </div>
+                                <p className="text-xs text-gray-600 m-0 mt-0.5 leading-snug">
+                                    {formatMessage(n)}
+                                </p>
+                                <p className="text-[11px] text-gray-400 m-0 mt-1">{timeAgo(n.sentAt)}</p>
+                            </div>
+                        </button>
+                    );
                 })}
-              </div>
-          )}
+            </div>
+
+            {/* 응급 알림 CTA */}
+            {unreadEmergency && (
+                <div className="px-4 my-4">
+                    <div className="bg-[#FFE5DB] rounded-2xl p-4 border border-[#FFCDB5]">
+                        <div className="flex items-center gap-2 mb-1">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                                <path d="M12 2L2 22h20L12 2z" stroke="#E8552B" strokeWidth="2" strokeLinejoin="round"/>
+                                <line x1="12" y1="10" x2="12" y2="15" stroke="#E8552B" strokeWidth="2" strokeLinecap="round"/>
+                                <circle cx="12" cy="18" r="1" fill="#E8552B"/>
+                            </svg>
+                            <p className="text-sm font-bold text-[#C73F10] m-0">응급 알림 확인 필요</p>
+                        </div>
+                        <p className="text-xs text-[#C73F10]/80 mb-3">낙상 감지 후 3분 경과. 지금 확인하세요.</p>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => onOpenEmergency?.(unreadEmergency)}
+                                className="flex-1 bg-[#FF6B3D] text-white rounded-xl py-2.5 font-bold text-sm border-none cursor-pointer"
+                            >
+                                영상 확인
+                            </button>
+                            <button className="flex-1 bg-white text-[#FF6B3D] rounded-xl py-2.5 font-bold text-sm border border-[#FF6B3D] cursor-pointer">
+                                119 통화
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
-      </div>
-  );
+    );
 }

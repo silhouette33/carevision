@@ -1,4 +1,4 @@
-const BASE_URL = 'http://localhost:3000/api';
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
 
 // 개발 테스트용 mock 데이터
 const MOCK = {
@@ -93,6 +93,9 @@ export const api = {
   // 감지
   getDetections: (patientId) =>
       useMock(() => request('GET', `/detections?patientId=${patientId}`), MOCK.detections),
+
+  createDetection: (body) =>
+      useMock(() => request('POST', '/detections', body), { ...body, id: Date.now(), detectedAt: new Date().toISOString() }),
 
   // 알림
   getNotifications: () =>

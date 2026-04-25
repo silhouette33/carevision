@@ -29,9 +29,12 @@ from typing import Deque, Tuple
 class MedicationScorer:
     # ── 튜닝 상수 ────────────────────────────────
     WINDOW_SECONDS = 10.0          # 시간창 길이
-    BOX_MIN_FRAMES = 3             # 약통 최소 감지 프레임 수
+    BOX_MIN_FRAMES = 2             # 약통 최소 감지 프레임 수 (3→2, 원거리 누락 완화)
     MOTION_MIN_FRAMES = 2          # 손→입 양성 최소 프레임 수
-    MOTION_POS_THRESHOLD = 0.5     # LSTM sigmoid 양성 기준
+    MOTION_POS_THRESHOLD = 0.35    # LSTM sigmoid 양성 기준 (0.5→0.35, 경계값 활용)
+    MOTION_EMA_ALPHA = 0.4         # motion_prob 지수이동평균 (지터 완화)
+    BOX_SCORING_CONF = 0.2         # 스코어링용 감지 임계값 (recall 우선)
+    STICKY_BOX_FRAMES = 5          # 박스를 마지막으로 본 뒤 N프레임은 보인 것으로 간주
 
     # 가중치 (score 0~1)
     W_BOX = 0.4
@@ -44,6 +47,10 @@ class MedicationScorer:
         self.histories: dict[str, Deque[Tuple[float, bool, float]]] = defaultdict(deque)
         # 한 번 TAKEN으로 확정된 카메라는 래치해두고, reset 할 때까지 재확정 안 함
         self.taken_latched: dict[str, bool] = defaultdict(bool)
+        # Sticky box: 카메라별 "박스를 마지막으로 본 이후 경과 프레임 수"
+        self.frames_since_box: dict[str, int] = defaultdict(lambda: 10**6)
+        # motion EMA 상태
+        self.motion_ema: dict[str, float] = defaultdict(float)
 
     # ────────────────────────────────────────────
     def _trim(self, cam: str, now: float):
@@ -59,22 +66,33 @@ class MedicationScorer:
         """
         now = time.time()
 
-        # ── 신호 1: 약통/약 감지 ────────────────
-        # medication_detector._decode_image + _detect_objects 재사용
+        # ── 신호 1: 약통/약 감지 (스코어링용 저임계값) ──
         image = self.med._decode_image(image_base64)
-        med_objects, all_objects = self.med._detect_objects(image)
-        box_seen = len(med_objects) > 0
+        med_objects, all_objects = self.med._detect_objects(
+            image, conf_threshold=self.BOX_SCORING_CONF
+        )
+        box_seen_raw = len(med_objects) > 0
         box_top_conf = max((o["confidence"] for o in med_objects), default=0.0)
 
-        # ── 신호 2: 손→입 동작 ─────────────────
+        # Sticky box: 원시 감지가 끊겨도 STICKY_BOX_FRAMES 동안 유지
+        if box_seen_raw:
+            self.frames_since_box[camera_id] = 0
+        else:
+            self.frames_since_box[camera_id] += 1
+        box_seen = self.frames_since_box[camera_id] <= self.STICKY_BOX_FRAMES
+
+        # ── 신호 2: 손→입 동작 (EMA 스무딩) ─────
         if self.hand is not None:
             hand_result = self.hand.detect(image_base64, camera_id)
-            motion_prob = float(hand_result.get("confidence", 0.0))
+            motion_prob_raw = float(hand_result.get("confidence", 0.0))
             hand_status = hand_result.get("status", "unknown")
         else:
-            motion_prob = 0.0
+            motion_prob_raw = 0.0
             hand_status = "not_loaded"
-        motion_positive = motion_prob >= self.MOTION_POS_THRESHOLD
+
+        prev_ema = self.motion_ema[camera_id]
+        motion_prob = self.MOTION_EMA_ALPHA * motion_prob_raw + (1 - self.MOTION_EMA_ALPHA) * prev_ema
+        self.motion_ema[camera_id] = motion_prob
 
         # ── 시간창 누적 ────────────────────────
         self.histories[camera_id].append((now, box_seen, motion_prob))
@@ -113,8 +131,10 @@ class MedicationScorer:
             "status": status,
             "signals": {
                 "box_visible": box_seen,
+                "box_visible_raw": box_seen_raw,
                 "box_top_confidence": round(box_top_conf, 3),
                 "hand_to_mouth_prob": round(motion_prob, 4),
+                "hand_to_mouth_prob_raw": round(motion_prob_raw, 4),
                 "hand_status": hand_status,
             },
             "window": {
@@ -134,6 +154,8 @@ class MedicationScorer:
     def reset(self, camera_id: str = "default"):
         self.histories.pop(camera_id, None)
         self.taken_latched[camera_id] = False
+        self.frames_since_box[camera_id] = 10**6
+        self.motion_ema[camera_id] = 0.0
         # 하위 파이프라인도 초기화 (LSTM 버퍼)
         if self.hand is not None:
             self.hand.reset(camera_id)

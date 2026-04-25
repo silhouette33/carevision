@@ -5,9 +5,16 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "build:app": "vite build --mode app",
+    "preview": "vite preview",
+    "android": "npm run build:app && npx cap sync android && npx cap open android",
+    "sync": "npm run build:app && npx cap sync android"
   },
   "dependencies": {
+    "@capacitor/android": "^8.3.1",
+    "@capacitor/cli": "^8.3.1",
+    "@capacitor/core": "^8.3.1",
+    "@capacitor/local-notifications": "^8.0.2",
     "@tailwindcss/postcss": "^4.2.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"

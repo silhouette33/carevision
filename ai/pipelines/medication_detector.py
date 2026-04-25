@@ -146,7 +146,8 @@ class MedicationDetector:
     COCO_MEDICATION_LABELS = {"bottle", "cup"}
     CUSTOM_MEDICATION_LABELS = {"pill", "pill_bottle", "medicine", "tablet", "drug"}
     CONSECUTIVE_THRESHOLD = 3
-    CONFIDENCE_THRESHOLD = 0.4
+    CONFIDENCE_THRESHOLD = 0.4           # 표시/단일 이미지 판정용 (UI bbox)
+    SCORING_CONFIDENCE_THRESHOLD = 0.2   # 스코어러용 (recall 우선, mAP50 0.34 보정)
 
     def __init__(self):
         self.is_custom_model = False
@@ -159,8 +160,10 @@ class MedicationDetector:
             self.yolo_model = YOLO(MODEL_PATH)
             self.is_custom_model = True
             self.model_type = "custom_pt"
-            self.medication_labels = self.CUSTOM_MEDICATION_LABELS | self.COCO_MEDICATION_LABELS
+            # 파인튜닝 모델은 모든 클래스가 약품 → 모델 클래스명 전부를 medication_labels로 사용
+            self.medication_labels = set(self.yolo_model.names.values())
             print(f"[MedicationDetector] 파인튜닝 모델 로드: {MODEL_PATH}")
+            print(f"[MedicationDetector] 감지 가능 약품 수: {len(self.medication_labels)}종")
         elif os.path.exists(ONNX_MODEL_PATH):
             self.onnx_detector = OnnxPillsDetector(ONNX_MODEL_PATH)
             self.is_custom_model = True
@@ -189,12 +192,18 @@ class MedicationDetector:
         _, buffer = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 90])
         return base64.b64encode(buffer).decode('utf-8')
 
-    def _detect_objects(self, image: np.ndarray) -> tuple:
-        """객체 감지 (ONNX 또는 YOLO 모델 사용)"""
+    def _detect_objects(self, image: np.ndarray, conf_threshold: float | None = None) -> tuple:
+        """객체 감지 (ONNX 또는 YOLO 모델 사용).
+
+        conf_threshold 를 주면 해당 임계값으로 필터링한다 (스코어러가 낮은 값으로 호출).
+        None 이면 self.CONFIDENCE_THRESHOLD (표시용 기본값).
+        """
+        threshold = self.CONFIDENCE_THRESHOLD if conf_threshold is None else conf_threshold
+
         if self.onnx_detector:
             # ONNX 모델: 모든 감지 결과가 약 관련
-            all_detections = self.onnx_detector.predict(image, self.CONFIDENCE_THRESHOLD)
-            medication_detections = all_detections[:]  # ONNX 모델은 capsules/tablets만 감지
+            all_detections = self.onnx_detector.predict(image, threshold)
+            medication_detections = all_detections[:]
             return medication_detections, all_detections
 
         # YOLO 모델 (.pt)
@@ -218,7 +227,7 @@ class MedicationDetector:
                     "bbox": bbox,
                 }
                 all_detections.append(detection)
-                if conf >= self.CONFIDENCE_THRESHOLD and label in self.medication_labels:
+                if conf >= threshold and label in self.medication_labels:
                     medication_detections.append(detection)
 
         return medication_detections, all_detections

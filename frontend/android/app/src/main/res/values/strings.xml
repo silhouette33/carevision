@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">CareVision</string>
+    <string name="title_activity_main">CareVision</string>
+    <string name="package_name">com.carevision.app</string>
+    <string name="custom_url_scheme">com.carevision.app</string>
+</resources>

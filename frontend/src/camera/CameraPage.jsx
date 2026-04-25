@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { store } from '../store';
+import { emergencyBeep } from '../notify';
 
-const AI_URL = 'http://localhost:8000';
+const AI_URL = import.meta.env.VITE_AI_BASE_URL || 'http://localhost:8000';
 const FRAME_INTERVAL_MS = 500; // 2 fps 정도로 전송 (MVP 가시성 확인 용)
 
 export default function CameraPage({ patient, patients = [], onSelectPatient, onClose }) {
@@ -64,8 +66,13 @@ function LiveDetectionView({ patient, onChangePatient }) {
     const captureCanvasRef = useRef(null);
     const intervalRef = useRef(null);
     const inflightRef = useRef(false);
+    const fileInputRef = useRef(null);
+    const videoObjectUrlRef = useRef(null);
 
     const [streaming, setStreaming] = useState(false);
+    const [source, setSource] = useState('webcam'); // 'webcam' | 'file'
+    const [videoFileName, setVideoFileName] = useState('');
+    const [videoPaused, setVideoPaused] = useState(false);
     const [error, setError] = useState(null);
     const [medObjects, setMedObjects] = useState([]);
     const [fall, setFall] = useState({ status: 'idle', confidence: 0 });
@@ -77,6 +84,35 @@ function LiveDetectionView({ patient, onChangePatient }) {
     const prevFallStatus = useRef('idle');
     const prevMedCount = useRef(0);
     const prevTaken = useRef(false);
+    const prevVideoTime = useRef(0);
+
+    // 감지기 상태 리셋 (루프 재시작 / 수동 리셋 공용)
+    const resetDetectionState = useCallback(async () => {
+        try {
+            await fetch(`${AI_URL}/detect/reset`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cameraId: `patient-${patient.id}` }),
+            });
+        } catch {}
+        prevFallStatus.current = 'idle';
+        prevMedCount.current = 0;
+        prevTaken.current = false;
+        setFall({ status: 'idle', confidence: 0 });
+        setMedScore(null);
+    }, [patient.id]);
+
+    // 비디오가 루프되어 currentTime이 뒤로 점프하면 감지기 상태 리셋
+    const onVideoTimeUpdate = useCallback(() => {
+        const v = videoRef.current;
+        if (!v) return;
+        const t = v.currentTime;
+        // 0.5초 이상 뒤로 점프 → 루프 재시작으로 간주
+        if (prevVideoTime.current - t > 0.5) {
+            resetDetectionState();
+        }
+        prevVideoTime.current = t;
+    }, [resetDetectionState]);
 
     const pushAlert = useCallback((type, text) => {
         const id = Date.now() + Math.random();
@@ -86,26 +122,101 @@ function LiveDetectionView({ patient, onChangePatient }) {
         }, 4000);
     }, []);
 
+    // 현재 source와 상관없이 기존 스트림/파일 리소스를 깨끗하게 정리
+    const teardownVideo = () => {
+        const v = videoRef.current;
+        if (v) {
+            const stream = v.srcObject;
+            if (stream && stream.getTracks) stream.getTracks().forEach((t) => t.stop());
+            v.srcObject = null;
+            try { v.pause(); } catch {}
+            v.removeAttribute('src');
+            v.load();
+        }
+        if (videoObjectUrlRef.current) {
+            try { URL.revokeObjectURL(videoObjectUrlRef.current); } catch {}
+            videoObjectUrlRef.current = null;
+        }
+    };
+
     const startCamera = async () => {
         setError(null);
+        teardownVideo();
+        setSource('webcam');
+        setVideoFileName('');
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: { width: 640, height: 480 },
                 audio: false,
             });
             videoRef.current.srcObject = stream;
+            videoRef.current.loop = false;
+            videoRef.current.muted = true;
             await videoRef.current.play();
             setStreaming(true);
+            setVideoPaused(false);
         } catch (e) {
             setError('웹캠 접근 실패: ' + e.message);
         }
     };
 
+    // 비디오 파일로 시연 (파일 업로드 또는 프리셋 URL)
+    const startVideoFile = async (fileOrUrl) => {
+        setError(null);
+        teardownVideo();
+        await resetDetectionState();
+        prevVideoTime.current = 0;
+
+        try {
+            let src;
+            let name;
+            if (fileOrUrl instanceof File) {
+                src = URL.createObjectURL(fileOrUrl);
+                videoObjectUrlRef.current = src;
+                name = fileOrUrl.name;
+            } else {
+                src = fileOrUrl;
+                name = fileOrUrl.split('/').pop();
+            }
+            const v = videoRef.current;
+            v.src = src;
+            v.loop = false;       // 시연 편의용 루프
+            v.muted = true;
+            v.playsInline = true;
+            await v.play();
+            setSource('file');
+            setVideoFileName(name);
+            setStreaming(true);
+            setVideoPaused(false);
+        } catch (e) {
+            setError('비디오 재생 실패: ' + e.message);
+        }
+    };
+
+    const onPickFile = (e) => {
+        const f = e.target.files?.[0];
+        if (f) startVideoFile(f);
+        // 같은 파일 재선택 허용
+        e.target.value = '';
+    };
+
+    const togglePause = () => {
+        const v = videoRef.current;
+        if (!v) return;
+        if (v.paused) {
+            v.play();
+            setVideoPaused(false);
+        } else {
+            v.pause();
+            setVideoPaused(true);
+        }
+    };
+
     const stopCamera = () => {
-        const stream = videoRef.current?.srcObject;
-        if (stream) stream.getTracks().forEach((t) => t.stop());
-        if (videoRef.current) videoRef.current.srcObject = null;
+        teardownVideo();
         setStreaming(false);
+        setVideoPaused(false);
+        setVideoFileName('');
         setMedObjects([]);
         setFall({ status: 'idle', confidence: 0 });
         setMedScore(null);
@@ -190,11 +301,19 @@ function LiveDetectionView({ patient, onChangePatient }) {
                 drawOverlay(objs, w, h);
                 setLastLatency(Math.round(performance.now() - t0));
 
-                // 낙상 상태 변화 시 알림
+                // 낙상 상태 변화 시 알림 + store 기록
                 const newStatus = json.fall?.status;
                 if (newStatus && newStatus !== prevFallStatus.current) {
                     if (newStatus === 'emergency') {
                         pushAlert('danger', '🚨 낙상 감지! 위급 상황');
+                        emergencyBeep();
+                        // 전역 store에 기록 → 알림/이력에 반영 + 진동/네이티브 알림
+                        store.recordDetection({
+                            type: 'FALL',
+                            confidence: json.fall?.confidence ?? 0.9,
+                            patient,
+                            extra: { location: '거실', source: 'camera' },
+                        });
                     } else if (newStatus === 'suspected') {
                         pushAlert('warn', '⚠️ 낙상 의심 자세');
                     }
@@ -206,10 +325,16 @@ function LiveDetectionView({ patient, onChangePatient }) {
                 }
                 prevMedCount.current = objs.length;
 
-                // 복약 완료 판정 순간 한 번만 토스트
+                // 복약 완료 판정 순간 한 번만 기록 (스토어에서 자동으로 스케줄 매칭 + 로그)
                 const takenNow = !!json.medication_score?.taken;
                 if (takenNow && !prevTaken.current) {
                     pushAlert('info', '✅ 복약 완료 확정!');
+                    store.recordDetection({
+                        type: 'MEDICATION',
+                        confidence: json.medication_score?.score ?? 0.8,
+                        patient,
+                        extra: { source: 'camera', status: 'taken' },
+                    });
                 }
                 prevTaken.current = takenNow;
             }
@@ -242,10 +367,10 @@ function LiveDetectionView({ patient, onChangePatient }) {
     return (
         <div className="min-h-screen bg-slate-100 max-w-[480px] mx-auto font-sans relative">
             {/* 헤더 */}
-            <div className="bg-red-600 px-4 pt-5 pb-4 flex justify-between items-center">
+            <div className="bg-[#FF6B3D] px-4 pt-5 pb-4 flex justify-between items-center">
                 <span className="text-white font-bold text-[17px]">🚨 실시간 모니터링</span>
                 <button
-                    className="bg-white text-red-600 border-none rounded-lg px-3 py-1.5 font-semibold cursor-pointer text-sm"
+                    className="bg-white text-[#FF6B3D] border-none rounded-lg px-3 py-1.5 font-semibold cursor-pointer text-sm"
                     onClick={onChangePatient}
                 >
                     환자 변경
@@ -293,6 +418,7 @@ function LiveDetectionView({ patient, onChangePatient }) {
                         className="absolute inset-0 w-full h-full object-contain"
                         muted
                         playsInline
+                        onTimeUpdate={onVideoTimeUpdate}
                     />
                     <canvas
                         ref={overlayRef}
@@ -324,19 +450,37 @@ function LiveDetectionView({ patient, onChangePatient }) {
                 {/* 제어 버튼 */}
                 <div className="mt-3 flex gap-2">
                     {!streaming ? (
-                        <button
-                            onClick={startCamera}
-                            className="flex-1 bg-blue-600 text-white rounded-xl py-3 font-bold text-sm border-none cursor-pointer"
-                        >
-                            ▶ 카메라 시작
-                        </button>
+                        <>
+                            <button
+                                onClick={startCamera}
+                                className="flex-1 bg-[#FF6B3D] text-white rounded-xl py-3 font-bold text-sm border-none cursor-pointer"
+                            >
+                                ▶ 웹캠 시작
+                            </button>
+                            <button
+                                onClick={() => fileInputRef.current?.click()}
+                                className="flex-1 bg-blue-600 text-white rounded-xl py-3 font-bold text-sm border-none cursor-pointer"
+                            >
+                                🎬 영상 선택
+                            </button>
+                        </>
                     ) : (
-                        <button
-                            onClick={stopCamera}
-                            className="flex-1 bg-red-500 text-white rounded-xl py-3 font-bold text-sm border-none cursor-pointer"
-                        >
-                            ■ 카메라 정지
-                        </button>
+                        <>
+                            <button
+                                onClick={stopCamera}
+                                className="flex-1 bg-red-500 text-white rounded-xl py-3 font-bold text-sm border-none cursor-pointer"
+                            >
+                                ■ 정지
+                            </button>
+                            {source === 'file' && (
+                                <button
+                                    onClick={togglePause}
+                                    className="bg-gray-800 text-white rounded-xl py-3 px-4 font-bold text-sm border-none cursor-pointer"
+                                >
+                                    {videoPaused ? '▶' : '⏸'}
+                                </button>
+                            )}
+                        </>
                     )}
                     <button
                         onClick={resetScorer}
@@ -344,6 +488,71 @@ function LiveDetectionView({ patient, onChangePatient }) {
                     >
                         🔄 리셋
                     </button>
+                    {/* 숨겨진 파일 input */}
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="video/*"
+                        className="hidden"
+                        onChange={onPickFile}
+                    />
+                </div>
+
+                {/* 시연 영상 모드 알림 배너 */}
+                {streaming && source === 'file' && (
+                    <div className="mt-3 bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center gap-2">
+                        <span className="text-lg">🎬</span>
+                        <div className="flex-1 min-w-0">
+                            <p className="text-[11px] font-bold text-blue-700 m-0">시연 모드 (파일 재생)</p>
+                            <p className="text-[10px] text-blue-600 m-0 truncate">{videoFileName}</p>
+                        </div>
+                        <span className="text-[10px] text-blue-500 font-mono">
+                            {videoPaused ? 'PAUSED' : 'LIVE'}
+                        </span>
+                    </div>
+                )}
+
+                {/* 시작 전 힌트 */}
+                {!streaming && (
+                    <div className="mt-3 bg-white rounded-xl p-3 border border-dashed border-gray-300 text-[11px] text-gray-600">
+                        <p className="m-0 mb-1 font-semibold text-gray-700">📹 시연 방법</p>
+                        <p className="m-0 leading-relaxed">
+                            • <b>웹캠 시작</b>: 실시간 웹캠으로 감지<br/>
+                            • <b>영상 선택</b>: 준비된 mp4/웹m 파일을 재생하며 AI가 프레임을 분석
+                            (낙상·복약 시연용). 루프 재생되며 하단 컨트롤로 일시정지 가능.
+                        </p>
+                    </div>
+                )}
+
+                {/* 수동 테스트 (AI 서버 없이 알림/기록 흐름 확인용) */}
+                <div className="mt-3 bg-white rounded-xl p-3 border border-dashed border-gray-300">
+                    <p className="text-[11px] font-semibold text-gray-500 m-0 mb-2">🧪 테스트용 시뮬레이션</p>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => store.recordDetection({
+                                type: 'FALL', confidence: 0.87, patient,
+                                extra: { location: '거실', source: 'manual' },
+                            })}
+                            className="flex-1 bg-[#E53935] text-white rounded-lg py-2 text-xs font-bold border-none cursor-pointer"
+                        >
+                            낙상 시뮬
+                        </button>
+                        <button
+                            onClick={() => {
+                                store.recordDetection({
+                                    type: 'MEDICATION', confidence: 0.92, patient,
+                                    extra: { source: 'manual', status: 'taken' },
+                                });
+                                const meds = store.getMedications(patient.id);
+                                if (meds.length > 0) {
+                                    store.logMedication(patient.id, meds[0].id, 'TAKEN');
+                                }
+                            }}
+                            className="flex-1 bg-[#10B981] text-white rounded-lg py-2 text-xs font-bold border-none cursor-pointer"
+                        >
+                            복약 시뮬
+                        </button>
+                    </div>
                 </div>
 
                 {/* 복약 완료 큰 배너 */}

@@ -1,0 +1,11 @@
+{
+  "appId": "com.carevision.app",
+  "appName": "CareVision",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

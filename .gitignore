@@ -34,3 +34,14 @@ firebase-service-account.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Capacitor / Android 빌드 산출물
+frontend/android/app/build/
+frontend/android/build/
+frontend/android/.gradle/
+frontend/android/app/src/main/assets/public/
+frontend/android/app/src/main/assets/capacitor.config.json
+frontend/android/app/src/main/assets/capacitor.plugins.json
+frontend/android/capacitor.settings.gradle
+frontend/android/local.properties
+frontend/android/app/release/
