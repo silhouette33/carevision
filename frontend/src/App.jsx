@@ -1,18 +1,20 @@
 import { useState } from 'react';
-import { Home, Bell, AlertTriangle, User } from 'lucide-react';
+import { Home, Bell, AlertTriangle, User, Pill } from 'lucide-react';
 import DashboardPage from './pages/DashboardPage';
 import PatientDetailPage from './pages/PatientDetailPage';
 import NotificationsPage from './pages/NotificationsPage';
 import LoginPage from './pages/LoginPage';
 import CameraPage from './camera/CameraPage';
 import MyPage from "./pages/MyPage.jsx";
+import MedicationPage from './pages/MedicationPage';
 import { api } from './api/client';
 
 const NAV_ITEMS = [
-    { id: 'dashboard', icon: Home,          label: '홈' },
-    { id: 'notifications', icon: Bell,      label: '알림' },
-    { id: 'camera', icon: AlertTriangle,    label: '긴급' },
-    { id: 'mypage', icon: User,             label: '마이' },
+    { id: 'dashboard', icon: Home, label: '홈' },
+    { id: 'medication', icon: Pill, label: '복약' }, // ✅ 추가
+    { id: 'notifications', icon: Bell, label: '알림' },
+    { id: 'camera', icon: AlertTriangle, label: '긴급' },
+    { id: 'mypage', icon: User, label: '마이' },
 ];
 
 export default function App() {
@@ -31,11 +33,11 @@ export default function App() {
     const [patients, setPatients] = useState([]);
 
     const handleLogin = async (form, mode) => {
-<<<<<<< HEAD
         if (mode === 'register') {
             await api.register(form);
             throw new Error('회원가입 완료! 로그인해주세요.');
         }
+
         const result = await api.login(form);
         localStorage.setItem('token', result.token);
         localStorage.setItem('user', JSON.stringify(result.user));
@@ -48,13 +50,6 @@ export default function App() {
         setUser(null);
         setPage('dashboard');
         setActiveTab('dashboard');
-=======
-        const data = mode === 'register'
-            ? await api.register(form)
-            : await api.login(form);
-        if (data?.token) localStorage.setItem('token', data.token);
-        setUser(data?.user ?? { name: form.username });
->>>>>>> 4742bed9dfa5967932158627473369faafe9d831
     };
 
     if (!user) return <LoginPage onLogin={handleLogin} />;
@@ -82,23 +77,47 @@ export default function App() {
         if (page === 'mypage') {
             return <MyPage user={user} onLogout={handleLogout} />;
         }
+
         if (page === 'notifications') return <NotificationsPage />;
+
         if (page === 'camera') {
             return (
                 <CameraPage
                     patient={selectedPatient ?? null}
                     patients={patients}
                     onSelectPatient={(p) => setSelectedPatient(p)}
-                    onClose={() => { setPage('dashboard'); setActiveTab('dashboard'); }}
+                    onClose={() => {
+                        setPage('dashboard');
+                        setActiveTab('dashboard');
+                    }}
                 />
             );
         }
+
+        if (page === 'medication') {
+            return (
+                <MedicationPage
+                    user={user}
+                    patients={patients}
+                    selectedPatientId={selectedPatient?.id}
+                    onSelectPatient={(p) => setSelectedPatient(p)}
+                />
+            );
+        }
+
         return (
             <DashboardPage
                 user={user}
                 onPatientsLoaded={(list) => setPatients(list)}
-                onSelectPatient={(p) => { setSelectedPatient(p); setPage('detail'); }}
-                onEmergency={(p) => { setSelectedPatient(p); setPage('camera'); setActiveTab('camera'); }}
+                onSelectPatient={(p) => {
+                    setSelectedPatient(p);
+                    setPage('detail');
+                }}
+                onEmergency={(p) => {
+                    setSelectedPatient(p);
+                    setPage('camera');
+                    setActiveTab('camera');
+                }}
             />
         );
     };
@@ -113,6 +132,7 @@ export default function App() {
                 {NAV_ITEMS.map(({ id, icon: Icon, label }) => {
                     const isActive = activeTab === id;
                     const isEmergency = id === 'camera';
+
                     return (
                         <button
                             key={id}
@@ -128,11 +148,13 @@ export default function App() {
                                 }
                                 strokeWidth={isActive ? 2.5 : 1.8}
                             />
-                            <span className={`text-[10px] font-medium ${
-                                isEmergency
-                                    ? isActive ? 'text-red-500' : 'text-gray-400'
-                                    : isActive ? 'text-blue-600' : 'text-gray-400'
-                            }`}>
+                            <span
+                                className={`text-[10px] font-medium ${
+                                    isEmergency
+                                        ? isActive ? 'text-red-500' : 'text-gray-400'
+                                        : isActive ? 'text-blue-600' : 'text-gray-400'
+                                }`}
+                            >
                                 {label}
                             </span>
                         </button>
