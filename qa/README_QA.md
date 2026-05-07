@@ -2,6 +2,12 @@
 
 > 본 문서는 CareVision vB 낙상감지 모델의 QA 진행 결과를 재현 가능한 형태로 정리한 것이다.
 > 작성 시점: 2026-05-02. 다음 단계는 웹 런타임(uvicorn AI 서버 + 프론트) 통합 검증.
+>
+> ⚠ **웹 런타임 모델 통일이 우선 작업.** 현재 외부 영상 결과가 QA 와 다른 1차 원인은
+> 데이터셋이 아니라 웹 런타임이 vB 모델 대신 legacy 2-class fallback 을 쓰고 있다는 점이다.
+> 데이터셋 보강은 PyTorch vB 단일 런타임 정착 이후에도 외부 metric 이 낮을 때만 진행한다.
+> **최종 목표는 `.venv311` 단일 환경에서 MediaPipe + PyTorch vB.** 마이그레이션 절차는
+> [`WEB_RUNTIME_QA.md`](./WEB_RUNTIME_QA.md) §7 참조.
 
 ---
 
@@ -244,25 +250,174 @@ py qa/evaluate_new_video_windows.py --fall-prob-thr 0.3 --fall-min-windows 1  # 
 
 ### 환경변수 override (데모/개발용)
 
-운영자가 실측 데이터를 가지고 있다면 환경변수로 runtime threshold 를 조정 가능:
+`fall_detector.py` 는 다음 6개 임계값을 환경변수로 조정 가능. 각 변수는 첫 호출 시 stdout
+에 한 번만 override 사실을 출력하고, 잘못된 값은 default 로 fallback.
+
+| 변수 | 의미 | Default | 범위 |
+|---|---|---:|---|
+| `FALL_PROB_THRESHOLD` | softmax[Fall] 통과 임계 (argmax==Fall 도 함께 요구) | `0.65` | 0.0~1.0 |
+| `FALL_CONFIRM_WINDOWS` | 이 회수 미만은 movement_pending (관찰 단계) | `3` | 1~100 |
+| `FALL_CONSECUTIVE_THRESHOLD` | 연속 fall 프레임 — emergency 후보 | `3` | 1~100 |
+| `FALL_VERTICAL_DROP_MIN` | recent hip_y 변화량 (lying suppression / dynamic gate) | `0.10` | 0.0~1.0 |
+| `FALL_MOTION_SCORE_MIN` | recent \|Δhip_y\| 평균 (lying suppression) | `0.005` | 0.0~1.0 |
+| `FALL_SLOW_MOTION_MAX` | 이 미만 motion = 천천히 눕기 후보 | `0.020` | 0.0~1.0 |
+| `FALL_DYNAMIC_MOTION_MIN` | **dynamic event gate motion 최소치** (NEW) | `0.020` | 0.0~1.0 |
+| `FALL_TORSO_CHANGE_MIN` | **dynamic event gate torso 회전 최소치(°)** (NEW) | `30.0` | 0.0~180.0 |
+
+> 실제 emergency 트리거는 `EMERGENCY_THRESHOLD = max(FALL_CONSECUTIVE_THRESHOLD, FALL_CONFIRM_WINDOWS+1)` 프레임.
+> default 조합 (3, 3) 에서는 `4` 프레임에서 emergency 가 발화된다 (fall_suspected 가 1 프레임 fire).
 
 ```bash
 # Windows
-set FALL_CONSECUTIVE_THRESHOLD=2
+set FALL_PROB_THRESHOLD=0.70
+set FALL_CONSECUTIVE_THRESHOLD=3
 
 # Linux/Mac
-export FALL_CONSECUTIVE_THRESHOLD=2
+export FALL_PROB_THRESHOLD=0.70
+export FALL_CONSECUTIVE_THRESHOLD=3
 
 uvicorn ai.main:app --reload --port 8000
 ```
 
-값 범위 `1 ~ 100`, 비정상 값이면 default 3 으로 fallback.
-첫 검출 시 stdout 에 다음과 같이 1 회 출력:
-```
-[FallDetector] CONSECUTIVE_THRESHOLD overridden via env FALL_CONSECUTIVE_THRESHOLD = 2 (default 3)
+→ production 은 default 유지 권장. 데모/개발 환경에서만 임계값 조정.
+
+### 알림 게이팅 — 5-state machine
+
+서비스 관점에서 "눕는 중간" 이 한순간 fall 로 잡혀 알림이 나가는 문제를 막기 위해
+다음 상태 머신을 사용한다. **알림 (`alert_triggered=true`) 은 `fall_emergency` 에서만 발화.**
+
+| `final_decision` | `status` | UI 라벨 | alert_triggered | 알림 발송 |
+|---|---|---|---|---|
+| `normal` | `normal` | 정상 | false | X |
+| `lying_suppressed` | `normal` | 누워 있음 | false | X |
+| `movement_pending` / `checking_transition` | `checking` | ⏳ 판정 중 | false | **X** |
+| `fall_suspected` | `suspected` | ⚠ 낙상 의심 | false | X (화면 경고만) |
+| `fall_emergency` | `emergency` | 🚨 낙상 발생 | **true** | **O** |
+
+상태 전이 (엄격 모드):
+1. **Phase 1 (Lying suppression)** — fall 후보 + recent `vertical_drop < MIN` + `motion_score < MIN`
+   → `lying_suppressed`. 처음부터 누워있거나 자는 상태.
+2. **Phase 2 (Slow transition)** — fall 후보 + `vertical_drop >= MIN` + `motion_score < SLOW_MAX`
+   → `movement_pending`. **counter RESET** (HOLD 가 아님 — 천천히 눕는 중 brief motion spike
+   가 누적되어 fall_suspected 까지 가던 잔존 문제 차단).
+3. **Phase 3 (Dynamic event gate)** — fall 후보 + Phase 1/2 미발화. 이 시점에 dynamic event
+   를 검사:
+   - `vertical_drop ≥ FALL_VERTICAL_DROP_MIN` AND
+   - `motion_score ≥ FALL_DYNAMIC_MOTION_MIN` AND
+   - `torso_angle_change ≥ FALL_TORSO_CHANGE_MIN` (단위 = °)
+   - **셋 다 충족** → `dynamic_fall_event=True` → counter 증가
+   - 하나라도 미충족 → `dynamic_fall_event=False` → suppress (`static_no_dynamic_event`)
+4. **Phase 4 (Confirmed fall — 엄격 게이트)** — fall_* 라벨은 **반드시 dynamic_event=True**
+   여야 함:
+   - 어떤 시점이든 **`dynamic_event=False`** 이면 fall_suspected/fall_emergency 라벨 절대
+     노출 X. counter > 0 이면 `movement_pending`, 아니면 `normal` 로 처리.
+   - `dynamic_event=True`:
+     - `1 ≤ count < CONFIRM_WINDOWS` → `movement_pending`
+     - `CONFIRM_WINDOWS ≤ count < EMERGENCY_THRESHOLD` → `fall_suspected` (화면 경고)
+     - `count ≥ EMERGENCY_THRESHOLD` AND **lstm_fall=True** → `fall_emergency` + 보호자 알림
+     - `count ≥ EMERGENCY_THRESHOLD` 이지만 lstm_fall=False (휴리스틱만) → `fall_suspected` 강등
+
+이 구조 덕분에:
+- **천천히 눕기는 절대 fall_* 라벨이 노출되지 않음** — Phase 2 에서 counter RESET,
+  Phase 3 의 motion 게이트도 통과하지 못해 dynamic_event=False 유지.
+- **눕는 중간 brief motion spike 누적 차단** — Phase 2 RESET (HOLD → RESET 변경) 으로
+  spike 가 끝날 때마다 counter 가 0 으로 돌아가 CONFIRM_WINDOWS 도달 불가능.
+- **누운 뒤 정지 상태에서 모델이 Fall 로 튀어도 알림 없음** — Phase 3 의 dynamic event
+  gate 가 motion / torso 변화 부족을 잡아 즉시 suppress.
+- **실제 급격한 낙상만 emergency 도달** — motion + drop + torso 회전이 모두 동시에
+  fall-like 임계 이상으로 **연속 4 프레임** 유지되어야 알림.
+
+> **이중 가드**: 백엔드의 상태 머신이 fall_* 라벨을 차단하고, 프론트(`CameraPage.jsx`) 도
+> `dynamic_fall_event=false` 면 백엔드가 보낸 `fall_suspected` / `fall_emergency` 를
+> `movement_pending` 으로 자동 변환해 표시. 알림 트리거도 `alert_triggered=true` AND
+> `dynamic_fall_event=true` 둘 다 충족할 때만 발화.
+
+### Lying suppression (오탐 억제)
+
+낮은 외부 metric 으로도 "누워서 자는 상태" 가 Fall 로 오탐되는 문제를 해결하기 위해
+**pose keypoint 후처리** 를 추가했다. 모델/휴리스틱이 Fall 후보를 잡아도 다음 둘 다
+부족하면 `lying_suppressed` 로 강등된다:
+
+- `vertical_drop` < `FALL_VERTICAL_DROP_MIN` (최근 30프레임 hip_y 의 max-min)
+- `motion_score` < `FALL_MOTION_SCORE_MIN` (최근 30프레임 frame-to-frame \|Δhip_y\| 평균)
+
+즉 **"의미 있는 vertical drop 또는 motion 이 있어야만 fall 로 인정"**. 처음부터 누워
+있거나 서서히 눕는 케이스는 두 신호가 모두 작아서 자동 억제된다.
+
+### `/detect/fall`, `/detect/live` 응답 — 디버그 필드
+
+```json
+{
+  // 알림 게이팅 — 프론트 / 백엔드 둘 다 이 두 필드만 보면 됨
+  "alert_triggered": true,           // ★ 보호자 알림 발화 여부 (fall_emergency 일 때만 true)
+  "alert_reason": "confirmed_fall: count=4>=EMERGENCY_THRESHOLD=4",
+
+  // 모델 신호 (raw)
+  "fall_probability": 0.812,         // 모델의 softmax[Fall]
+  "confidence": 0.876,               // 모델의 top prediction 확신도 (Fall 일 수도, Lying 일 수도)
+  "model_prediction": "Fall",        // top class 라벨 (Fall/Walking/Lying_Down/Sitting/Standing_Transition)
+
+  // 상태 머신
+  "final_decision": "fall_emergency",// normal / movement_pending / fall_suspected / fall_emergency / lying_suppressed / warmup / no_person
+  "suppression_reason": null,        // lying suppression 사유 (Phase 1) 또는 static_no_dynamic_event (Phase 3)
+  "transition_state": null,          // slow transition 사유 (Phase 2) — "slow_lying_or_sitting: ..."
+
+  // Dynamic event gate (Phase 3) — 정적 누움 + Fall 예측 오탐 방지의 핵심
+  "dynamic_fall_event": true,        // 세 신호(drop, motion, torso) 모두 fall-like 임계 통과 여부
+  "dynamic_gate_reason": "all_satisfied: drop=0.213>=0.10 & motion=0.0240>=0.0200 & torso_Δ=38.5°>=30.0°",
+
+  // Kinematic 신호 (recent_* 는 동일 값의 명시적 alias)
+  "vertical_drop": 0.213,            // 최근 30 프레임 hip_y range
+  "motion_score": 0.0124,            // 최근 30 프레임 |Δhip_y| 평균
+  "torso_angle_change": 38.5,        // 첫/마지막 torso angle 차이 (degrees)
+  "recent_vertical_drop": 0.213,
+  "recent_motion_score": 0.0124,
+  "recent_torso_angle_change": 38.5,
+
+  // 카운터
+  "consecutive_fall_windows": 4,     // 연속 fall frame count
+  "pending_windows": 0,              // EMERGENCY_THRESHOLD 까지 남은 프레임 수
+
+  // legacy 호환 (기존 클라이언트 보호)
+  "type": "FALL",
+  "status": "emergency",             // legacy: emergency/suspected/checking/normal/buffering/no_person
+  "method": "lstm",                  // legacy: lstm / heuristic:reason / lstm+kinematic_suppress / lstm+slow_transition_hold / yolo_bbox
+  "lstm_prob": 0.812,                // legacy alias of fall_probability
+  "heuristic": false,
+  "detected": true,                  // legacy = alert_triggered
+  "consecutive_frames": 4,           // legacy alias of consecutive_fall_windows
+
+  // routes.py 가 추가
+  "model_backend": "pytorch_vB",
+  "qa_validated": true
+}
 ```
 
-→ production 은 default 3 유지 권장. 데모/개발 환경에서만 1~2 로 낮춰 즉응성 시연.
+### 테스트 케이스별 기대 시그널 + 알림 게이팅
+
+| 시나리오 | model_prediction | fall_probability | drop | motion | torso_Δ | dynamic_fall_event | final_decision (시간 진행) | 화면 라벨 | alert_triggered |
+|---|---|---|---|---|---|---|---|---|---|
+| 정상 서있음 | Standing/Walking | <0.3 | 작음 | 작음 | 작음 | false | `normal` | 정상 | **false** |
+| 걷기 | Walking | 낮음 | 중간 | 중간 | 작음 | false | `normal` | 정상 | **false** |
+| 앉기 | Sitting | 낮~중 | 중 | 중 | 중 | false | `normal` 또는 일시 `movement_pending` | 정상/판정 중 | **false** |
+| **천천히 눕기** | Lying_Down/Fall | 변동 | ≥0.10 | <0.020 | 중~↑ | **false** | `movement_pending` → `lying_suppressed` | **판정 중 → 누워 있음** | **false** |
+| 누워서 자기 | Lying_Down/Fall | 변동 | ≈0 | ≈0 | ≈0 | **false** | `lying_suppressed` | 누워 있음 | **false** |
+| 누운 뒤 모델이 Fall 튐 | Fall | 높음 | ≈0 | ≈0 | ≈0 | **false** | `lying_suppressed` (`static_no_dynamic_event`) | 누워 있음 | **false** |
+| 실제 낙상 | Fall | ≥0.65 | ≥0.10 | ≥0.020 | ≥30° | **true** | `movement_pending`(1~2프) → `fall_suspected`(3프) → `fall_emergency`(4프+) | 판정 중 → 낙상 의심 → 낙상 발생 | **true** |
+
+> **중요**: "천천히 눕기" 행에서 brief motion spike 가 발생해도 Phase 2 RESET 덕분에
+> counter 가 누적되지 않아 `fall_suspected` 라벨이 절대 노출되지 않는다. dynamic_event=False
+> 가 유지되는 한 화면은 "판정 중" → "누워 있음" 으로만 전이된다.
+
+핵심 설계:
+- **천천히 눕기**: `vertical_drop` 은 충족되지만 `motion_score < SLOW_MOTION_MAX` 이므로
+  Phase 2 (slow transition) 가 발화 → counter hold → `movement_pending` 에서 멈춤 →
+  자세 안정 후 Phase 1 (lying suppression) 으로 전이.
+- **실제 낙상**: motion_score 가 SLOW 임계 이상이므로 Phase 2 미발화 → counter 가
+  4 프레임에 도달 → emergency. 4 프레임 ≈ 130 ms (30fps 기준) 의 미니멀 debounce.
+
+웹 화면 (CameraPage) 의 디버그 스트립에 위 모든 신호 + `alert: ON/off` + `pending_windows`
+가 실시간 표시되므로, 각 케이스를 직접 시연하며 상태 머신 동작을 검증할 수 있다.
 
 ---
 
@@ -308,25 +463,47 @@ py -m pytest -q qa/test_fall_api.py
 # (B) vB Keras 모델 로드 검증 (.venv)
 py qa/check_fall_model_load.py
 
-# (C) test_vB.npz baseline 재현 (.venv)
+# (C) test_vB.npz baseline 재현 — Keras (.venv)
 py qa/evaluate_vB_npz.py
 py qa/evaluate_vB_npz.py --npz path/to/test_vB.npz
+
+# (C') PyTorch vB 마이그레이션 (★ 신규)
+.\.venv\Scripts\activate
+py qa/convert_keras_to_pt.py             # Keras → PyTorch 가중치 변환 + sanity check
+# 실패 시 fallback (.venv311):
+.\.venv311\Scripts\activate
+py qa/train_vB_pt.py                     # train/val/test_vB.npz 로 재학습
+py qa/evaluate_vB_pt_npz.py              # PT vB baseline 재현 검증
 
 # (D) 외부 영상 QA — Stage 1 (.venv311)
 .\.venv311\Scripts\activate
 py qa/extract_new_video_keypoints.py
 py qa/extract_new_video_keypoints.py --max-frames 600 --mediapipe-complexity 2
 
-# (E) 외부 영상 QA — Stage 2 (.venv)
-.\.venv\Scripts\activate
-py qa/evaluate_new_video_windows.py                                  # default: thr=0.5, min=1
+# (E) 외부 영상 QA — Stage 2 (.venv 또는 .venv311; 백엔드 자동 검출)
+py qa/evaluate_new_video_windows.py                                  # default: thr=0.5, min=1, backend=auto
+py qa/evaluate_new_video_windows.py --backend pytorch_vB             # PT vB 강제
+py qa/evaluate_new_video_windows.py --backend keras_vB               # Keras 비교용
 py qa/evaluate_new_video_windows.py --fall-min-windows 2             # 보수
-py qa/evaluate_new_video_windows.py --fall-prob-thr 0.3 --fall-min-windows 1   # 약신호 포함
 
-# (F) 실시간 서버 (개발/데모)
-set FALL_CONSECUTIVE_THRESHOLD=2     # Windows
-export FALL_CONSECUTIVE_THRESHOLD=2  # Linux/Mac
-uvicorn ai.main:app --reload --port 8000
+# (F) 실시간 서버 (개발/데모) — 8개 임계값 모두 env 로 조정 가능
+set FALL_PROB_THRESHOLD=0.65         # Windows
+set FALL_CONFIRM_WINDOWS=3
+set FALL_CONSECUTIVE_THRESHOLD=3
+set FALL_VERTICAL_DROP_MIN=0.10
+set FALL_MOTION_SCORE_MIN=0.005
+set FALL_SLOW_MOTION_MAX=0.020
+set FALL_DYNAMIC_MOTION_MIN=0.020
+set FALL_TORSO_CHANGE_MIN=30.0
+export FALL_PROB_THRESHOLD=0.65      # Linux/Mac
+export FALL_CONFIRM_WINDOWS=3
+export FALL_CONSECUTIVE_THRESHOLD=3
+export FALL_VERTICAL_DROP_MIN=0.10
+export FALL_MOTION_SCORE_MIN=0.005
+export FALL_SLOW_MOTION_MAX=0.020
+export FALL_DYNAMIC_MOTION_MIN=0.020
+export FALL_TORSO_CHANGE_MIN=30.0
+uvicorn ai.main:app --reload --port 8000   # PT vB 가 있으면 자동 채택 (1순위)
 ```
 
 ### 산출물 위치
@@ -344,7 +521,13 @@ uvicorn ai.main:app --reload --port 8000
 
 | 날짜 | 내용 |
 |---|---|
-| 2026-05-02 | API mock pytest 4건 정착, vB 모델 로드 검증, test_vB.npz baseline 재현, 외부 영상 2단계 QA 구축, filename dedup 버그 수정(video_id 키 매칭), Zenodo 임계값 실험 후 Stage 2 default `fall_min_windows=1` 채택, runtime `FALL_CONSECUTIVE_THRESHOLD` env 도입 |
+| 2026-05-02 | (1차) API mock pytest 4건 정착, vB 모델 로드 검증, test_vB.npz baseline 재현, 외부 영상 2단계 QA 구축, filename dedup 버그 수정(video_id 키 매칭), Zenodo 임계값 실험 후 Stage 2 default `fall_min_windows=1` 채택, runtime `FALL_CONSECUTIVE_THRESHOLD` env 도입 |
+| 2026-05-02 | (2차) 웹 런타임 진단 → 모델 불일치 확인. `/detect/model_info` 엔드포인트 + `CameraPage` 배지 추가. `WEB_RUNTIME_QA.md` 작성. |
+| 2026-05-02 | (3차) PyTorch vB 마이그레이션 완료. `convert_keras_to_pt.py` / `train_vB_pt.py` / `evaluate_vB_pt_npz.py` 신규. `fall_detector.py` 로더 우선순위 PT vB > Keras vB > Legacy PT > heuristic. `evaluate_new_video_windows.py` 에 `--backend` auto-detect 추가. `/detect/model_info.model_backend` 가 `pytorch_vB`/`keras_vB`/`pytorch_fallback`/`heuristic` 중 하나로 명확화. |
+| 2026-05-02 | (4차) **Lying suppression** — pose keypoint 후처리 추가. `vertical_drop` / `motion_score` / `torso_angle_change` 계산해 "처음부터 누워있음/천천히 눕기" 케이스를 `lying_suppressed` 로 강등. 임계값 4종(`FALL_PROB_THRESHOLD=0.65`, `FALL_CONSECUTIVE_THRESHOLD=3`, `FALL_VERTICAL_DROP_MIN=0.10`, `FALL_MOTION_SCORE_MIN=0.005`) 모두 env-tunable. `/detect/fall` `/detect/live` 응답에 `fall_probability` / `confidence` 분리 + 9개 디버그 필드 추가. CameraPage 가 "낙상 확률" / "판정 신뢰도" 분리 표시 + kinematics 디버그 스트립. |
+| 2026-05-02 | (5차) **Movement pending state machine** — 눕는 중간 단계가 일시적으로 emergency 로 잡혀 알림이 먼저 나가던 문제 해결. (1) `FALL_CONFIRM_WINDOWS` (default 3) + `FALL_SLOW_MOTION_MAX` (default 0.020) env 추가. (2) 3-way counter: 천천히 눕기(`drop≥MIN` AND `motion<SLOW_MAX`) 감지 시 counter HOLD → `movement_pending` 유지 → 자세 안정 후 `lying_suppressed` 자연 전이. (3) 알림 게이팅을 `status=='emergency'` 비교에서 `alert_triggered=true` flag 로 명확화 — `routes.py` + 프론트 동시 갱신. 알림은 오직 `final_decision=='fall_emergency'` 일 때만 발화. (4) 응답에 `alert_triggered`, `alert_reason`, `transition_state`, `pending_windows` 4개 필드 추가. (5) CameraPage 5-state UI (정상 / 판정 중 / 낙상 의심 / 낙상 발생 / 누워 있음). |
+| 2026-05-02 | (6차) **Dynamic event gate** — 누운 뒤 정지 상태에서 모델이 Fall 로 튀어도 emergency 까지 가던 잔존 문제 해결. (1) `FALL_DYNAMIC_MOTION_MIN` (default 0.020) + `FALL_TORSO_CHANGE_MIN` (default 30°) env 추가. (2) `_compute_dynamic_event()` 가 (drop, motion, torso_angle_change) 셋이 모두 fall-like 임계 이상일 때만 True. (3) `dynamic_fall_event=False` 면 즉시 suppress (`static_no_dynamic_event`) → counter 증가 차단. (4) 최종 emergency 게이트: `count >= EMERGENCY_THRESHOLD` AND `dynamic_event=True` AND `lstm_fall=True` 모두 충족 시에만 `fall_emergency` — 셋 중 하나라도 미달이면 `fall_suspected` 강등. (5) 응답에 `dynamic_fall_event`, `dynamic_gate_reason`, `recent_*` 5개 필드 추가. (6) CameraPage 디버그 스트립에 `dyn_event ✓/✗` 칩 + 사유 표시. |
+| 2026-05-02 | (7차) **엄격 게이팅 — 천천히 눕는 중 fall_suspected 잔존 문제** 해결. (1) Phase 2 (slow transition) 의 counter 동작을 HOLD → **RESET** 으로 변경 — 천천히 눕는 중 brief motion spike 가 누적되어 fall_suspected 까지 가던 케이스 차단. (2) 상태 머신에 `elif not dynamic_event` 분기 추가 — counter 가 양수여도 현재 dynamic_event=False 면 fall_* 라벨 절대 노출 X (movement_pending 또는 normal 로 강제). (3) 워밍업 분기에도 동일 dynamic_event gate + Phase 3 정적-while-Fall suppress 적용. (4) 프론트 CameraPage 가 backend 가 보낸 fall_suspected/fall_emergency 를 dynamic_event=false 면 movement_pending 으로 자동 변환 (방어 가드). 알람 트리거도 `alert_triggered=true AND dynamic_fall_event=true` 둘 다 요구. |
 
 세부 이력은 git log 참조.
 
