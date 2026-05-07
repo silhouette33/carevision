@@ -1,16 +1,11 @@
 import { useState } from 'react';
-import {
-    Bell, AlertTriangle, CheckCircle, Smartphone,
-    User, Lock, Phone, Camera, LogOut, ChevronRight,
-    Shield
-} from 'lucide-react';
+import { AlertTriangle, BedDouble, Pill, Phone, Camera, LogOut, ChevronRight, ShieldCheck } from 'lucide-react';
 
 export default function MyPage({ user, onLogout }) {
     const [toggles, setToggles] = useState({
-        missedMed: true,
         fallDetect: true,
-        takenMed: false,
-        dailyReport: true,
+        inactivity: true,
+        missedMed: true,
     });
 
     const toggle = (key) => setToggles(prev => ({ ...prev, [key]: !prev[key] }));
@@ -20,133 +15,124 @@ export default function MyPage({ user, onLogout }) {
             onClick={onToggle}
             className={`w-10 h-[22px] rounded-full relative transition-colors duration-200 border-none cursor-pointer ${on ? 'bg-blue-600' : 'bg-gray-200'}`}
         >
-            <div className={`w-[18px] h-[18px] bg-white rounded-full absolute top-[2px] transition-all duration-200 shadow-sm ${on ? 'right-[2px]' : 'left-[2px]'}`} />
+            <div className={`w-[18px] h-[18px] bg-white rounded-full absolute top-[2px] transition-all duration-200 shadow-sm ${on ? 'left-[20px]' : 'left-[2px]'}`} />
         </button>
     );
 
     const alarmItems = [
         {
+            key: 'fallDetect',
+            icon: <AlertTriangle size={16} strokeWidth={2} className="text-red-500" />,
+            iconBg: 'bg-red-50',
+            label: '낙상 감지 알림',
+            desc: 'AI 감지 즉시 푸시',
+        },
+        {
+            key: 'inactivity',
+            icon: <BedDouble size={16} strokeWidth={2} className="text-amber-600" />,
+            iconBg: 'bg-amber-50',
+            label: '무동작 감지 알림',
+            desc: '30분 이상 정지 시 알림',
+        },
+        {
             key: 'missedMed',
-            icon: <Bell size={16} strokeWidth={2} className="text-blue-600" />,
+            icon: <Pill size={16} strokeWidth={2} className="text-blue-600" />,
             iconBg: 'bg-blue-50',
             label: '복약 미확인 알림',
-            desc: '복약 후 30분 미감지 시 알림',
-        },
-        {
-            key: 'fallDetect',
-            icon: <AlertTriangle size={16} strokeWidth={2} className="text-amber-600" />,
-            iconBg: 'bg-amber-50',
-            label: '낙상 감지 긴급 알림',
-            desc: '카메라 AI 낙상 감지 즉시 알림',
-        },
-        {
-            key: 'takenMed',
-            icon: <CheckCircle size={16} strokeWidth={2} className="text-green-600" />,
-            iconBg: 'bg-green-50',
-            label: '복약 완료 알림',
-            desc: '복약 감지 시 확인 알림',
-        },
-        {
-            key: 'dailyReport',
-            icon: <Smartphone size={16} strokeWidth={2} className="text-purple-600" />,
-            iconBg: 'bg-purple-50',
-            label: '일일 리포트 푸시',
-            desc: '매일 오후 8시 복약 요약 알림',
+            desc: '복약 후 30분 미감지 시',
         },
     ];
 
-    const accountItems = [
-        { icon: <User size={15} className="text-gray-500" />, label: '프로필 수정' },
-        { icon: <Lock size={15} className="text-gray-500" />, label: '비밀번호 변경' },
-        { icon: <Phone size={15} className="text-gray-500" />, label: '긴급 연락처 설정' },
-        { icon: <Camera size={15} className="text-gray-500" />, label: '카메라 연동 관리' },
+    const settingItems = [
+        {
+            icon: <Phone size={15} className="text-gray-500" />,
+            label: '긴급 연락처 설정',
+            desc: '119 · 가족 · 담당 의사',
+            onPress: () => {},
+        },
+        {
+            icon: <Camera size={15} className="text-gray-500" />,
+            label: '카메라 연동 관리',
+            desc: '연결된 기기 확인 및 수정',
+            onPress: () => {},
+        },
     ];
+
+    const displayName = user?.name ?? user?.username ?? '보호자';
+    const initial = displayName[0]?.toUpperCase() ?? '보';
 
     return (
-        <div className="min-h-screen bg-slate-100 max-w-[480px] mx-auto font-sans">
+        <div className="min-h-screen bg-slate-100 max-w-[480px] mx-auto font-sans pb-8">
 
-            <div className="bg-blue-700 px-4 pt-6 pb-8">
-                <p className="text-xs font-semibold text-blue-300 mb-4">마이페이지</p>
-                <div className="flex items-center gap-3.5">
-                    <div className="w-14 h-14 rounded-full bg-blue-500 border-2 border-blue-300 flex items-center justify-center text-white text-xl font-bold shrink-0">
-                        {user?.username?.[0]?.toUpperCase() ?? '보'}
+            {/* 헤더 */}
+            <div className="bg-blue-700 px-5 pt-6 pb-7 rounded-b-3xl">
+                <div className="flex items-center gap-3">
+                    <div className="w-13 h-13 w-[52px] h-[52px] rounded-full bg-white/20 flex items-center justify-center text-white text-lg font-semibold shrink-0">
+                        {initial}
                     </div>
-                    <div className="flex-1 min-w-0">
-                        <p className="text-white font-bold text-base leading-tight">{user?.name ?? user?.username ?? '보호자'}</p>
-                        <p className="text-blue-200 text-xs mt-0.5 truncate">{user?.email ?? 'carevision@email.com'}</p>
-                    </div>
-                    <div className="bg-blue-600 border border-blue-400 rounded-full px-3 py-1 flex items-center gap-1 shrink-0">
-                        <Shield size={11} className="text-blue-200" />
-                        <span className="text-[11px] font-semibold text-blue-200">보호자</span>
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 mt-5">
-                    {[
-                        { value: '8명', label: '담당 환자', color: 'text-white' },
-                        { value: '92%', label: '금주 복약률', color: 'text-green-400' },
-                        { value: '3건', label: '미확인 알림', color: 'text-amber-400' },
-                    ].map(({ value, label, color }) => (
-                        <div key={label} className="bg-blue-800 rounded-xl p-2.5 text-center">
-                            <p className={`text-lg font-bold ${color} m-0`}>{value}</p>
-                            <p className="text-[10px] text-blue-300 m-0 mt-0.5">{label}</p>
+                    <div>
+                        <p className="text-white font-semibold text-base leading-tight">{displayName}</p>
+                        <p className="text-blue-200 text-xs mt-0.5">{user?.email ?? 'carevision@email.com'}</p>
+                        <div className="inline-flex items-center gap-1 mt-1.5 bg-white/15 rounded-full px-2.5 py-0.5">
+                            <ShieldCheck size={10} className="text-blue-200" />
+                            <span className="text-[11px] text-blue-200 font-medium">보호자</span>
                         </div>
-                    ))}
+                    </div>
                 </div>
             </div>
 
-            <div className="px-3 pt-3 pb-6 flex flex-col gap-2.5">
+            <div className="px-4 flex flex-col gap-3 mt-3">
 
-                <div className="bg-white rounded-2xl px-4 py-3.5 shadow-sm">
-                    <p className="text-xs font-bold text-gray-900 mb-3">알림 설정</p>
-                    <div className="flex flex-col">
-                        {alarmItems.map(({ key, icon, iconBg, label, desc }, i) => (
-                            <div
-                                key={key}
-                                className={`flex items-center justify-between py-2.5 ${i < alarmItems.length - 1 ? 'border-b border-gray-50' : ''}`}
-                            >
-                                <div className="flex items-center gap-2.5">
-                                    <div className={`w-8 h-8 ${iconBg} rounded-lg flex items-center justify-center shrink-0`}>
-                                        {icon}
-                                    </div>
-                                    <div>
-                                        <p className="text-[13px] font-semibold text-gray-800 m-0">{label}</p>
-                                        <p className="text-[11px] text-gray-400 m-0">{desc}</p>
-                                    </div>
+                {/* 알림 설정 */}
+                <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+                    <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-4 pt-3.5 pb-2">알림</p>
+                    {alarmItems.map(({ key, icon, iconBg, label, desc }, i) => (
+                        <div key={key}>
+                            {i > 0 && <div className="h-px bg-gray-50 mx-4" />}
+                            <div className="flex items-center gap-3 px-4 py-3">
+                                <div className={`w-9 h-9 ${iconBg} rounded-xl flex items-center justify-center shrink-0`}>
+                                    {icon}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-[13px] font-semibold text-gray-800">{label}</p>
+                                    <p className="text-[11px] text-gray-400">{desc}</p>
                                 </div>
                                 <Toggle on={toggles[key]} onToggle={() => toggle(key)} />
                             </div>
-                        ))}
-                    </div>
+                        </div>
+                    ))}
                 </div>
 
-                <div className="bg-white rounded-2xl px-4 py-3.5 shadow-sm">
-                    <p className="text-xs font-bold text-gray-900 mb-3">계정 설정</p>
-                    <div className="flex flex-col">
-                        {accountItems.map(({ icon, label }, i) => (
+                {/* 설정 */}
+                <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+                    <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-4 pt-3.5 pb-2">설정</p>
+                    {settingItems.map(({ icon, label, desc, onPress }, i) => (
+                        <div key={label}>
+                            {i > 0 && <div className="h-px bg-gray-50 mx-4" />}
                             <button
-                                key={label}
-                                className={`flex items-center justify-between py-2.5 w-full bg-transparent border-none cursor-pointer text-left ${i < accountItems.length - 1 ? 'border-b border-gray-50' : ''}`}
+                                onClick={onPress}
+                                className="flex items-center gap-3 px-4 py-3 w-full bg-transparent border-none cursor-pointer text-left"
                             >
-                                <div className="flex items-center gap-2.5">
-                                    <div className="w-8 h-8 bg-gray-50 rounded-lg flex items-center justify-center shrink-0">
-                                        {icon}
-                                    </div>
-                                    <span className="text-[13px] text-gray-700">{label}</span>
+                                <div className="w-9 h-9 bg-gray-50 rounded-xl flex items-center justify-center shrink-0">
+                                    {icon}
                                 </div>
-                                <ChevronRight size={14} className="text-gray-300" />
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-[13px] text-gray-800">{label}</p>
+                                    <p className="text-[11px] text-gray-400">{desc}</p>
+                                </div>
+                                <ChevronRight size={14} className="text-gray-300 shrink-0" />
                             </button>
-                        ))}
-                    </div>
+                        </div>
+                    ))}
                 </div>
 
-                {/* 로그아웃 — onLogout 호출 시 App.jsx handleLogout이 localStorage까지 정리 */}
+                {/* 로그아웃 */}
                 <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
                     <button
-                        className="w-full flex items-center gap-2.5 px-4 py-3.5 bg-transparent border-none cursor-pointer text-left"
                         onClick={onLogout}
+                        className="flex items-center gap-3 px-4 py-3.5 w-full bg-transparent border-none cursor-pointer text-left"
                     >
-                        <div className="w-8 h-8 bg-red-50 rounded-lg flex items-center justify-center shrink-0">
+                        <div className="w-9 h-9 bg-red-50 rounded-xl flex items-center justify-center shrink-0">
                             <LogOut size={15} className="text-red-500" />
                         </div>
                         <span className="text-[13px] font-semibold text-red-500">로그아웃</span>

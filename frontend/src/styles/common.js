@@ -13,7 +13,7 @@ export const layout = {
         background: colors.bg,
         padding: '12px',
         fontFamily: 'Pretendard, sans-serif',
-        maxWidth: '480px',   // 모바일 우선
+        maxWidth: '390px',   // 모바일 우선
         margin: '0 auto',    // PC에서 중앙 정렬
         boxSizing: 'border-box',
     },

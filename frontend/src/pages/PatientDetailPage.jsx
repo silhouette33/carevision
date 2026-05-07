@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { ChevronLeft } from 'lucide-react';
 import { api } from '../api/client';
 
 const DAYS_KR = { MON: '월', TUE: '화', WED: '수', THU: '목', FRI: '금', SAT: '토', SUN: '일' };
@@ -72,69 +73,69 @@ export default function PatientDetailPage({ patient, onBack }) {
   };
 
   return (
-      <div className="min-h-screen bg-slate-100 font-sans pb-8">
+      <div className="min-h-screen bg-gradient-to-b from-blue-50 to-gray-100 font-sans pb-8">
 
         {/* 헤더 */}
-        <div className="mb-5 px-4 pt-5">
-          <button
-              className="text-blue-600 font-semibold text-sm mb-3 bg-transparent border-none cursor-pointer p-0"
-              onClick={onBack}
-          >
-            ← 뒤로
-          </button>
-          <div className="flex gap-3 items-center">
-            <div className="w-13 h-13 rounded-full bg-blue-800 text-white flex items-center justify-center text-xl font-bold shrink-0 w-12 h-12">
-              {patient.name[0]}
+        <div className="bg-blue-600 text-white px-4 pt-4 pb-0 shadow-md">
+          <div className="flex items-center gap-3 mb-4">
+            <button
+                className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 transition flex items-center justify-center border-none cursor-pointer"
+                onClick={onBack}
+            >
+              <ChevronLeft size={18} className="text-white" />
+            </button>
+            <div className="flex items-center gap-3 flex-1">
+              <div className="w-10 h-10 rounded-full bg-white/20 text-white flex items-center justify-center text-lg font-bold shrink-0">
+                {patient.name[0]}
+              </div>
+              <div>
+                <h2 className="text-base font-bold leading-tight">{patient.name}</h2>
+                <p className="text-xs opacity-80">
+                  {patient.age}세 · {patient.address}{patient.phone ? ` · ${patient.phone}` : ''}
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-xl font-bold text-gray-900 mb-1">{patient.name}</h2>
-              <p className="text-xs text-gray-500">
-                {patient.age}세 · {patient.address}{patient.phone ? ` · ${patient.phone}` : ''}
-              </p>
-            </div>
+          </div>
+
+          {/* 탭 */}
+          <div className="flex gap-1">
+            <button
+                className={`px-5 py-2 border-none cursor-pointer text-sm font-medium rounded-t-lg transition-colors ${
+                    tab === 'medication'
+                        ? 'bg-white text-blue-600 font-bold shadow'
+                        : 'text-white/70 bg-transparent'
+                }`}
+                onClick={() => setTab('medication')}
+            >
+              💊 복약 관리
+            </button>
+            <button
+                className={`px-5 py-2 border-none cursor-pointer text-sm font-medium rounded-t-lg transition-colors ${
+                    tab === 'detection'
+                        ? 'bg-white text-blue-600 font-bold shadow'
+                        : 'text-white/70 bg-transparent'
+                }`}
+                onClick={() => setTab('detection')}
+            >
+              🚨 감지 이력
+            </button>
           </div>
         </div>
 
-        {/* 탭 */}
-        <div className="flex border-b-2 border-gray-200 mb-5 px-4">
-          <button
-              className={`px-5 py-2 border-none bg-transparent cursor-pointer text-sm font-medium -mb-0.5 border-b-2 transition-colors ${
-                  tab === 'medication'
-                      ? 'text-blue-800 border-b-2 border-blue-800 font-bold'
-                      : 'text-gray-500 border-transparent'
-              }`}
-              onClick={() => setTab('medication')}
-          >
-            💊 복약 관리
-          </button>
-          <button
-              className={`px-5 py-2 border-none bg-transparent cursor-pointer text-sm font-medium -mb-0.5 border-b-2 transition-colors ${
-                  tab === 'detection'
-                      ? 'text-blue-800 border-b-2 border-blue-800 font-bold'
-                      : 'text-gray-500 border-transparent'
-              }`}
-              onClick={() => setTab('detection')}
-          >
-            🚨 감지 이력
-          </button>
-        </div>
-
-        <div className="px-4">
+        <div className="px-4 pt-4">
           {tab === 'medication' && (
               <>
-                {/* 복약 스케줄 카드 */}
                 <div className="bg-white rounded-2xl p-5 mb-4 shadow-sm">
                   <div className="flex justify-between items-center mb-4">
                     <h3 className="text-base font-bold text-gray-900">복약 스케줄</h3>
                     <button
-                        className="px-4 py-2 bg-blue-800 text-white border-none rounded-lg cursor-pointer text-xs font-semibold"
+                        className="px-4 py-2 bg-blue-600 text-white border-none rounded-lg cursor-pointer text-xs font-semibold hover:bg-blue-700 transition"
                         onClick={() => setShowForm(!showForm)}
                     >
                       {showForm ? '✕ 닫기' : '+ 스케줄 추가'}
                     </button>
                   </div>
 
-                  {/* 추가 폼 */}
                   {showForm && (
                       <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex flex-col gap-2 mb-4">
                         <input
@@ -164,7 +165,7 @@ export default function PatientDetailPage({ patient, onBack }) {
                                     onClick={() => toggleDay(d)}
                                     className={`w-9 h-9 rounded-full text-xs font-medium border cursor-pointer transition-colors ${
                                         newMed.days.includes(d)
-                                            ? 'bg-blue-800 text-white border-blue-800'
+                                            ? 'bg-blue-600 text-white border-blue-600'
                                             : 'bg-white text-gray-700 border-gray-300'
                                     }`}
                                 >
@@ -175,13 +176,13 @@ export default function PatientDetailPage({ patient, onBack }) {
                         </div>
                         <div className="flex gap-2 mt-1">
                           <button
-                              className="flex-1 py-2 bg-blue-800 text-white border-none rounded-lg cursor-pointer font-semibold text-sm"
+                              className="flex-1 py-2 bg-blue-600 text-white border-none rounded-lg cursor-pointer font-semibold text-sm hover:bg-blue-700 transition"
                               onClick={handleAddMed}
                           >
                             추가
                           </button>
                           <button
-                              className="flex-1 py-2 bg-gray-100 text-gray-700 border-none rounded-lg cursor-pointer font-semibold text-sm"
+                              className="flex-1 py-2 bg-gray-100 text-gray-700 border-none rounded-lg cursor-pointer font-semibold text-sm hover:bg-gray-200 transition"
                               onClick={() => { setShowForm(false); setNewMed({ name:'', dosage:'', scheduleTime:'08:00', days:[] }); }}
                           >
                             취소
@@ -190,27 +191,26 @@ export default function PatientDetailPage({ patient, onBack }) {
                       </div>
                   )}
 
-                  {/* 약 목록 */}
                   <div className="flex flex-col gap-2">
                     {medications.length === 0 && (
                         <p className="text-gray-400 text-sm text-center py-5">등록된 복약 스케줄이 없습니다.</p>
                     )}
                     {medications.map(m => (
                         <div key={m.id} className="flex items-center gap-3 p-3 border border-gray-200 rounded-xl bg-gray-50">
-                          <div className="text-base font-bold text-blue-800 min-w-[54px]">{m.scheduleTime}</div>
+                          <div className="text-base font-bold text-blue-600 min-w-[54px]">{m.scheduleTime}</div>
                           <div className="flex-1">
                             <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
                               {m.name}
-                              <span className="bg-gray-200 text-gray-600 rounded-full px-2 py-0.5 text-xs font-medium">
-                          {m.dosage}
-                        </span>
+                              <span className="bg-blue-100 text-blue-600 rounded-full px-2 py-0.5 text-xs font-medium">
+                                {m.dosage}
+                              </span>
                             </div>
                             <div className="text-xs text-gray-500 mt-0.5">
                               {m.days && m.days.split(',').map(d => DAYS_KR[d]).join(' ')}
                             </div>
                           </div>
                           <button
-                              className="px-3 py-1.5 bg-white text-red-600 border border-red-200 rounded-lg cursor-pointer text-xs font-semibold shrink-0"
+                              className="px-3 py-1.5 bg-white text-red-600 border border-red-200 rounded-lg cursor-pointer text-xs font-semibold shrink-0 hover:bg-red-50 transition"
                               onClick={() => handleDeleteMed(m.id)}
                           >
                             삭제
@@ -220,13 +220,12 @@ export default function PatientDetailPage({ patient, onBack }) {
                   </div>
                 </div>
 
-                {/* 복약 현황 카드 */}
                 <div className="bg-white rounded-2xl p-5 mb-4 shadow-sm">
                   <div className="flex justify-between items-center mb-4">
                     <h3 className="text-base font-bold text-gray-900">복약 현황</h3>
                     <input
                         type="date"
-                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-700 outline-none"
+                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-700 outline-none focus:border-blue-600"
                         value={selectedDate}
                         onChange={e => setSelectedDate(e.target.value)}
                     />
@@ -252,7 +251,6 @@ export default function PatientDetailPage({ patient, onBack }) {
               </>
           )}
 
-          {/* 감지 이력 */}
           {tab === 'detection' && (
               <div className="bg-white rounded-2xl p-5 shadow-sm">
                 <h3 className="text-base font-bold text-gray-900 mb-4">감지 이력</h3>

@@ -11,9 +11,9 @@ import { api } from './api/client';
 
 const NAV_ITEMS = [
     { id: 'dashboard', icon: Home, label: '홈' },
-    { id: 'medication', icon: Pill, label: '복약' }, // ✅ 추가
+    { id: 'medication', icon: Pill, label: '복약' },
     { id: 'notifications', icon: Bell, label: '알림' },
-    { id: 'camera', icon: AlertTriangle, label: '긴급' },
+    { id: 'camera', icon: AlertTriangle, label: '응급' },
     { id: 'mypage', icon: User, label: '마이' },
 ];
 
@@ -37,7 +37,6 @@ export default function App() {
             await api.register(form);
             throw new Error('회원가입 완료! 로그인해주세요.');
         }
-
         const result = await api.login(form);
         localStorage.setItem('token', result.token);
         localStorage.setItem('user', JSON.stringify(result.user));
@@ -54,9 +53,13 @@ export default function App() {
 
     if (!user) return <LoginPage onLogin={handleLogin} />;
 
+    // 공통 네비게이션 핸들러
     const handleNav = (id) => {
         if (id === 'camera') {
             setActiveTab('camera');
+            if (!selectedPatient && patients.length > 0) {
+                setSelectedPatient(patients[0]);
+            }
             setPage('camera');
             return;
         }
@@ -65,70 +68,90 @@ export default function App() {
     };
 
     const renderPage = () => {
-        if (page === 'detail') {
-            return (
-                <PatientDetailPage
-                    patient={selectedPatient}
-                    onBack={() => setPage('dashboard')}
-                />
-            );
+        switch (page) {
+            case 'detail':
+                return (
+                    <PatientDetailPage
+                        patient={selectedPatient}
+                        onBack={() => {
+                            setPage('dashboard');
+                            setActiveTab('dashboard');
+                        }}
+                    />
+                );
+
+            case 'mypage':
+                return <MyPage user={user} onLogout={handleLogout} />;
+
+
+            case 'camera':
+                return (
+                    <CameraPage
+                        patient={selectedPatient ?? null}
+                        patients={patients}
+                        onSelectPatient={(p) => setSelectedPatient(p)}
+                        onClose={() => {
+                            setPage('dashboard');
+                            setActiveTab('dashboard');
+                        }}
+                    />
+                );
+
+
+            case 'notifications':
+                return (
+                    <NotificationsPage
+                        onBack={() => {
+                            setPage('dashboard');
+                            setActiveTab('dashboard');
+                        }}
+                        onNavigate={handleNav}
+                    />
+                );
+
+            case 'medication':
+                return (
+                    <MedicationPage
+                        onBack={() => {
+                            setPage('dashboard');
+                            setActiveTab('dashboard');
+                        }}
+                        // 대시보드에서 선택된 환자가 있다면 해당 환자를 기본값으로 전달
+                        defaultPatientId={selectedPatient?.id}
+                    />
+                );
+
+            case 'dashboard':
+            default:
+                return (
+                    <DashboardPage
+                        user={user}
+                        onPatientsLoaded={(list) => setPatients(list)}
+                        onSelectPatient={(p) => {
+                            setSelectedPatient(p);
+                            setPage('detail');
+                        }}
+                        onEmergency={(p) => {
+                            setSelectedPatient(p);
+                            setPage('camera');
+                            setActiveTab('camera');
+                        }}
+                        // 대시보드 내의 복약 카드 클릭 시 handleNav를 통해 'medication'으로 이동
+                        onNavigate={handleNav}
+                    />
+                );
         }
-
-        if (page === 'mypage') {
-            return <MyPage user={user} onLogout={handleLogout} />;
-        }
-
-        if (page === 'notifications') return <NotificationsPage />;
-
-        if (page === 'camera') {
-            return (
-                <CameraPage
-                    patient={selectedPatient ?? null}
-                    patients={patients}
-                    onSelectPatient={(p) => setSelectedPatient(p)}
-                    onClose={() => {
-                        setPage('dashboard');
-                        setActiveTab('dashboard');
-                    }}
-                />
-            );
-        }
-
-        if (page === 'medication') {
-            return (
-                <MedicationPage
-                    user={user}
-                    patients={patients}
-                    selectedPatientId={selectedPatient?.id}
-                    onSelectPatient={(p) => setSelectedPatient(p)}
-                />
-            );
-        }
-
-        return (
-            <DashboardPage
-                user={user}
-                onPatientsLoaded={(list) => setPatients(list)}
-                onSelectPatient={(p) => {
-                    setSelectedPatient(p);
-                    setPage('detail');
-                }}
-                onEmergency={(p) => {
-                    setSelectedPatient(p);
-                    setPage('camera');
-                    setActiveTab('camera');
-                }}
-            />
-        );
     };
 
     return (
-        <div className="min-h-screen bg-slate-100 max-w-[480px] mx-auto relative font-sans">
-            <div className="pb-[60px]">
+        <div className="min-h-screen bg-slate-100 max-w-[480px] mx-auto relative font-sans shadow-2xl">
+            {/* 페이지 렌더링 영역 (하단 바 높이만큼 여백 확보) */}
+            <div className="pb-[70px]">
                 {renderPage()}
             </div>
 
-            <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[480px] bg-white border-t border-gray-200 flex justify-around items-center py-1.5 pb-2.5 shadow-[0_-2px_12px_rgba(0,0,0,0.08)] z-50">
+            {/* 하단 고정 네비게이션 바 */}
+            <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[480px] bg-white border-t border-gray-100 flex justify-around items-center py-2 pb-4 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] z-50 rounded-t-3xl">
                 {NAV_ITEMS.map(({ id, icon: Icon, label }) => {
                     const isActive = activeTab === id;
                     const isEmergency = id === 'camera';
@@ -136,31 +159,31 @@ export default function App() {
                     return (
                         <button
                             key={id}
-                            className="flex flex-col items-center bg-transparent border-none cursor-pointer px-5 py-1 gap-0.5"
+                            className="flex flex-col items-center bg-transparent border-none cursor-pointer px-4 py-1 gap-1 transition-all active:scale-90"
                             onClick={() => handleNav(id)}
                         >
-                            <Icon
-                                size={22}
-                                className={
-                                    isEmergency
-                                        ? isActive ? 'text-red-500' : 'text-gray-400'
-                                        : isActive ? 'text-blue-600' : 'text-gray-400'
-                                }
-                                strokeWidth={isActive ? 2.5 : 1.8}
-                            />
-                            <span
-                                className={`text-[10px] font-medium ${
-                                    isEmergency
-                                        ? isActive ? 'text-red-500' : 'text-gray-400'
-                                        : isActive ? 'text-blue-600' : 'text-gray-400'
-                                }`}
-                            >
+                            <div className={`p-1 rounded-xl transition-colors ${isActive && !isEmergency ? 'bg-blue-50' : ''}`}>
+                                <Icon
+                                    size={22}
+                                    className={
+                                        isEmergency
+                                            ? isActive ? 'text-red-500' : 'text-gray-400'
+                                            : isActive ? 'text-blue-600' : 'text-gray-400'
+                                    }
+                                    strokeWidth={isActive ? 2.5 : 2}
+                                />
+                            </div>
+                            <span className={`text-[10px] font-bold tracking-tight ${
+                                isEmergency
+                                    ? isActive ? 'text-red-500' : 'text-gray-400'
+                                    : isActive ? 'text-blue-600' : 'text-gray-400'
+                            }`}>
                                 {label}
                             </span>
                         </button>
                     );
                 })}
-            </div>
+            </nav>
         </div>
     );
 }
