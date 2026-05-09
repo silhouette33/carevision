@@ -321,33 +321,37 @@ function LiveDetectionView({ patient, onChangePatient }) {
                 drawOverlay(objs, w, h);
                 setLastLatency(Math.round(performance.now() - t0));
 
-                // 낙상 알림 게이팅 — alert_triggered=true AND dynamic_fall_event=true.
-                // 두 조건 모두 충족해야 보호자 알림. movement_pending / fall_suspected /
-                // lying_suppressed 에서는 알림 X.
+                // 낙상 알림 게이팅 — alert_triggered=true (backend 의 사건 latch 가 이미
+                // 최초 1회만 true 로 발화). dynamic_fall_event=true 도 추가 가드로 요구.
                 const fallObj = json.fall || {};
                 const newDecision = fallObj.final_decision || fallObj.status;
                 const dynamicEvt = fallObj.dynamic_fall_event === true;
                 const alertNow = fallObj.alert_triggered === true && dynamicEvt;
                 const prevDecision = prevFallStatus.current;
-                if (newDecision !== prevDecision) {
-                    if (alertNow) {
-                        // fall_emergency 확정 → 보호자 알림 + 진동 + store 기록
-                        pushAlert('danger', '🚨 낙상 감지! 위급 상황');
-                        emergencyBeep();
-                        store.recordDetection({
-                            type: 'FALL',
-                            confidence: fallObj.fall_probability ?? fallObj.confidence ?? 0.9,
-                            patient,
-                            extra: { location: '거실', source: 'camera' },
-                        });
-                    } else if (newDecision === 'fall_suspected' && dynamicEvt) {
-                        // 화면 경고만 — 알림 / 진동 X. dynamic event 가 있어야만 노출.
-                        pushAlert('warn', '⚠️ 낙상 의심 — 관찰 중');
-                    }
-                    // movement_pending / lying_suppressed / dynamic_event=false 인 fall_* :
-                    // 화면 라벨 변경만 (pushAlert 없음, beep 없음, store 기록 없음)
-                    prevFallStatus.current = newDecision;
+                if (alertNow) {
+                    // 사건 latch 의 최초 알림 (또는 cooldown reminder) → 보호자 알림 + 진동 + store 기록
+                    pushAlert('danger', '🚨 낙상 감지! 위급 상황');
+                    emergencyBeep();
+                    store.recordDetection({
+                        type: 'FALL',
+                        confidence: fallObj.fall_probability ?? fallObj.confidence ?? 0.9,
+                        patient,
+                        extra: {
+                            location: '거실',
+                            source: 'camera',
+                            incident_id: fallObj.fall_incident_id || null,
+                        },
+                    });
+                } else if (newDecision !== prevDecision
+                    && newDecision === 'fall_suspected'
+                    && dynamicEvt
+                    && fallObj.fall_incident_active !== true) {
+                    // 화면 경고만 — 알림 / 진동 X. dynamic event 가 있고 아직 사건 latch 가 아닐 때만 노출.
+                    pushAlert('warn', '⚠️ 낙상 의심 — 관찰 중');
                 }
+                // movement_pending / lying_suppressed / dynamic_event=false 인 fall_* :
+                // 화면 라벨 변경만 (pushAlert 없음, beep 없음, store 기록 없음)
+                prevFallStatus.current = newDecision;
                 // 약 처음 감지되거나 개수가 늘어났을 때 알림
                 if (objs.length > prevMedCount.current) {
                     pushAlert('info', `💊 약 ${objs.length}개 감지`);
@@ -391,17 +395,26 @@ function LiveDetectionView({ patient, onChangePatient }) {
     //   fall_emergency      → 낙상 발생 (보호자 알림 O — alert_triggered=true)
     //   lying_suppressed    → 정상/누워 있음 (알림 X)
     //
+    // 사건 latch: fall_incident_active=true 인 동안에는 lying_suppressed 가 와도
+    // 화면 라벨을 "낙상 발생 — 확인 필요" 로 강제 유지.
     // Defense-in-depth: backend 가 fall_suspected/fall_emergency 를 보내도
     // dynamic_fall_event=false 면 절대 화면에 "낙상" 라벨을 띄우지 않는다.
-    // (backend 가 이미 강제 처리하지만, 프론트에서 한 번 더 가드)
     const _rawKey = fall.final_decision || fall.status;
     const _isFallLabel = _rawKey === 'fall_suspected' || _rawKey === 'fall_emergency'
         || _rawKey === 'emergency' || _rawKey === 'suspected';
-    const fallKey = (_isFallLabel && fall.dynamic_fall_event === false)
-        ? 'movement_pending'  // dynamic_event 가 없으면 fall_* 대신 판정 중 표시
-        : _rawKey;
+    let fallKey;
+    if (fall.fall_incident_active === true) {
+        // 사건 latch 활성 — 화면은 항상 낙상 발생 라벨 유지 (lying_suppressed 무시)
+        fallKey = 'fall_incident_active';
+    } else if (_isFallLabel && fall.dynamic_fall_event === false) {
+        // dynamic_event 가 없으면 fall_* 대신 판정 중 표시
+        fallKey = 'movement_pending';
+    } else {
+        fallKey = _rawKey;
+    }
     const fallMeta = {
         // 새 final_decision 값
+        fall_incident_active: { color: 'bg-red-700 text-white animate-pulse', label: '🚨 낙상 발생 — 확인 필요' },
         fall_emergency:   { color: 'bg-red-600 text-white',     label: '🚨 낙상 발생' },
         fall_suspected:   { color: 'bg-orange-500 text-white',  label: '⚠️ 낙상 의심' },
         movement_pending: { color: 'bg-yellow-400 text-gray-900', label: '⏳ 판정 중' },
@@ -834,6 +847,33 @@ function LiveDetectionView({ patient, onChangePatient }) {
                     </div>
                 </div>
 
+                {/* 낙상 사건 active 배너 — 명시적 reset 까지 유지 */}
+                {fall.fall_incident_active === true && (
+                    <div className="mt-2 rounded-lg p-3 border border-red-300 bg-red-100 flex items-start gap-2">
+                        <span className="text-lg">🚨</span>
+                        <div className="flex-1 min-w-0">
+                            <p className="text-[12px] font-bold text-red-800 m-0 leading-tight">
+                                낙상 발생 — 확인 필요
+                            </p>
+                            <p className="text-[10px] text-red-700 m-0 mt-0.5 leading-tight">
+                                자동으로 정상/누움 상태로 돌아가지 않습니다. 보호자 확인 후 아래 버튼으로 해제하세요.
+                            </p>
+                            {fall.fall_incident_id && (
+                                <p className="text-[9px] text-red-600 m-0 mt-0.5 break-all">
+                                    incident_id: {fall.fall_incident_id}
+                                </p>
+                            )}
+                        </div>
+                        <button
+                            type="button"
+                            onClick={resetDetectionState}
+                            className="bg-white text-red-700 border border-red-400 rounded-md px-2 py-1 text-[11px] font-semibold cursor-pointer shrink-0 hover:bg-red-50"
+                        >
+                            사건 해제
+                        </button>
+                    </div>
+                )}
+
                 {/* 낙상 디버그 스트립 — 테스트 케이스(서있음/걷기/앉기/눕기/자기/낙상) 구분용 */}
                 {fall.final_decision && (
                     <div
@@ -868,7 +908,28 @@ function LiveDetectionView({ patient, onChangePatient }) {
                             {(fall.pending_windows ?? 0) > 0 && (
                                 <span><b>to_emerg</b>: {fall.pending_windows}</span>
                             )}
+                            {fall.incident_state && (
+                                <span>
+                                    <b>incident</b>:{' '}
+                                    <span className={fall.incident_state === 'active' ? 'text-red-700 font-semibold' : 'text-gray-500'}>
+                                        {fall.incident_state}
+                                    </span>
+                                </span>
+                            )}
+                            {fall.latch_allowed !== undefined && (
+                                <span>
+                                    <b>latch</b>:{' '}
+                                    <span className={fall.latch_allowed ? 'text-red-700 font-semibold' : 'text-gray-500'}>
+                                        {fall.latch_allowed ? 'allowed' : 'blocked'}
+                                    </span>
+                                </span>
+                            )}
                         </div>
+                        {fall.latch_block_reason && (
+                            <p className="text-[10px] text-amber-700 m-0 mt-1 leading-tight">
+                                ⛔ latch_blocked: {fall.latch_block_reason}
+                            </p>
+                        )}
                         {fall.dynamic_gate_reason && (
                             <p className={`text-[10px] m-0 mt-1 leading-tight ${
                                 fall.dynamic_fall_event ? 'text-red-700' : 'text-gray-600'

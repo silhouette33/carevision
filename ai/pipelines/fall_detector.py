@@ -704,6 +704,116 @@ class FallDetector:
         self.kin_buffers: dict[str, deque] = defaultdict(
             lambda: deque(maxlen=self.KINEMATICS_HISTORY)
         )
+        # NEW: 낙상 사건 latch — 한 번 fall_emergency 가 확정되면 명시적 reset 전까지
+        # final_decision 을 강제로 "fall_emergency" 로 유지. lying_suppressed/normal/
+        # movement_pending 으로 자동 전이하지 못하게 막는다.
+        self.fall_incident_active: dict[str, bool] = defaultdict(bool)
+        self.fall_incident_started_at: dict[str, float | None] = defaultdict(lambda: None)
+        self.fall_incident_id: dict[str, str | None] = defaultdict(lambda: None)
+        self.last_alert_at: dict[str, float | None] = defaultdict(lambda: None)
+
+    def _apply_incident_latch(
+        self,
+        camera_id: str,
+        tentative_decision: str,
+        tentative_status: str,
+        count: int,
+        *,
+        model_backend: str | None = None,
+        model_prediction: str | None = None,
+        fall_probability: float = 0.0,
+        dynamic_event: bool = False,
+        warmup: bool = False,
+    ) -> tuple[str, str, bool, str | None, dict]:
+        """낙상 사건 latch — fall_emergency 가 한 번 확정되면 명시적 reset 전까지 유지.
+
+        latch 활성화는 다음 모든 조건을 만족할 때만 허용:
+          - model_backend == "pytorch_vB"
+          - model_prediction == "Fall"
+          - fall_probability >= FALL_PROB_THRESHOLD
+          - dynamic_event == True
+          - warmup == False
+          - tentative_decision == "fall_emergency" (count >= EMERGENCY_THRESHOLD)
+
+        반환: (final_decision, status, alert_triggered, alert_reason, incident_meta)
+            incident_meta 에 latch_allowed / latch_block_reason 포함.
+        """
+        import time
+        now = time.time()
+        was_active = self.fall_incident_active[camera_id]
+
+        # ── latch 활성화 게이트 계산 ─────────────────────────────────────
+        block_reasons = []
+        if model_backend != "pytorch_vB":
+            block_reasons.append(f"backend={model_backend}!=pytorch_vB")
+        if model_prediction != "Fall":
+            block_reasons.append(f"model_prediction={model_prediction}!=Fall")
+        if fall_probability < self.FALL_PROB_THRESHOLD:
+            block_reasons.append(
+                f"fall_prob={fall_probability:.3f}<{self.FALL_PROB_THRESHOLD:.3f}"
+            )
+        if not dynamic_event:
+            block_reasons.append("dynamic_fall_event=false")
+        if warmup:
+            block_reasons.append("warmup=true")
+        latch_allowed = (len(block_reasons) == 0)
+        latch_block_reason = " & ".join(block_reasons) if block_reasons else None
+
+        if tentative_decision == "fall_emergency" and not was_active and latch_allowed:
+            # 새 사건 시작 — 모든 게이트 통과
+            self.fall_incident_active[camera_id] = True
+            self.fall_incident_started_at[camera_id] = now
+            self.fall_incident_id[camera_id] = f"FALL_{int(now * 1000)}_{camera_id}"
+            self.last_alert_at[camera_id] = now
+            alert_triggered = True
+            alert_reason = (
+                f"new_incident: id={self.fall_incident_id[camera_id]}, "
+                f"count={count}>=EMERGENCY_THRESHOLD={self.EMERGENCY_THRESHOLD}, "
+                f"all_gates_passed"
+            )
+            final_decision = "fall_emergency"
+            status = "emergency"
+        elif tentative_decision == "fall_emergency" and not was_active and not latch_allowed:
+            # tentative 가 emergency 이지만 게이트 차단 — 알림 발화 금지, 상태 강등
+            final_decision = "fall_suspected"
+            status = "suspected"
+            alert_triggered = False
+            alert_reason = f"latch_blocked: {latch_block_reason}"
+        elif was_active:
+            # 사건이 이미 진행 중 — 상태 강제 유지
+            last = self.last_alert_at[camera_id] or 0.0
+            elapsed = now - last
+            if self.ALERT_COOLDOWN_SECONDS > 0 and elapsed >= self.ALERT_COOLDOWN_SECONDS:
+                self.last_alert_at[camera_id] = now
+                alert_triggered = True
+                alert_reason = (
+                    f"incident_reminder: id={self.fall_incident_id[camera_id]}, "
+                    f"elapsed={elapsed:.1f}s>=cooldown={self.ALERT_COOLDOWN_SECONDS:.1f}s"
+                )
+            else:
+                alert_triggered = False
+                alert_reason = None
+            final_decision = "fall_emergency"
+            status = "emergency"
+        else:
+            # 사건 비활성 — tentative 그대로 사용
+            final_decision = tentative_decision
+            status = tentative_status
+            alert_triggered = (final_decision == "fall_emergency")
+            alert_reason = (
+                f"confirmed_dynamic_fall: count={count}>=EMERGENCY_THRESHOLD={self.EMERGENCY_THRESHOLD}"
+                if alert_triggered else None
+            )
+
+        meta = {
+            "fall_incident_active": self.fall_incident_active[camera_id],
+            "incident_state": "active" if self.fall_incident_active[camera_id] else "inactive",
+            "fall_incident_started_at": self.fall_incident_started_at[camera_id],
+            "fall_incident_id": self.fall_incident_id[camera_id],
+            "latch_allowed": latch_allowed,
+            "latch_block_reason": latch_block_reason,
+        }
+        return final_decision, status, alert_triggered, alert_reason, meta
 
     def _is_slow_transition(self, kin_signals: dict) -> bool:
         """천천히 눕기/일어나기 같은 점진적 자세 변화 감지.
@@ -890,10 +1000,17 @@ class FallDetector:
             else:
                 final_decision, status = "fall_emergency", "emergency"
 
-            alert_triggered = (final_decision == "fall_emergency")
-            alert_reason = (
-                f"yolo_bbox: count={count}>=EMERGENCY_THRESHOLD={self.EMERGENCY_THRESHOLD}"
-                if alert_triggered else None
+            # 사건 latch 적용 — YOLO bbox 만으로는 dynamic_event 가 false 이므로
+            # 사실상 latch 활성화 불가 (의도된 동작 — pose 기반 신호가 있어야 알람).
+            final_decision, status, alert_triggered, alert_reason, incident_meta = (
+                self._apply_incident_latch(
+                    camera_id, final_decision, status, count,
+                    model_backend="yolo_bbox",
+                    model_prediction="yolo_bbox" if is_fall else "no_pose",
+                    fall_probability=0.0,
+                    dynamic_event=False,
+                    warmup=False,
+                )
             )
             return {
                 "detected": alert_triggered,
@@ -908,6 +1025,8 @@ class FallDetector:
                 # YOLO fallback 은 kinematics 가 없으므로 dynamic event 정보 없음
                 "dynamic_fall_event": False,
                 "dynamic_gate_reason": "no_pose_kinematics",
+                "latch_allowed": incident_meta["latch_allowed"],
+                "latch_block_reason": incident_meta["latch_block_reason"],
                 "vertical_drop": 0.0,
                 "motion_score": 0.0,
                 "torso_angle_change": 0.0,
@@ -916,6 +1035,10 @@ class FallDetector:
                 "recent_torso_angle_change": 0.0,
                 "consecutive_fall_windows": count,
                 "pending_windows": max(0, self.EMERGENCY_THRESHOLD - count) if count > 0 else 0,
+                "fall_incident_active": incident_meta["fall_incident_active"],
+                "incident_state": incident_meta["incident_state"],
+                "fall_incident_started_at": incident_meta["fall_incident_started_at"],
+                "fall_incident_id": incident_meta["fall_incident_id"],
                 "type": "FALL",
                 "status": status,
                 "consecutive_frames": count,  # legacy alias
@@ -935,7 +1058,8 @@ class FallDetector:
         # 휴리스틱 (워밍업 동안 더 관대, LSTM 활성 후엔 강한 신호만)
         heuristic_is_fall, reason = _heuristic_fall(landmarks, strong_only=buffer_full)
 
-        # ── B-1) 워밍업: 버퍼 부족 → 휴리스틱 + 모든 Phase gate 적용 ──
+        # ── B-1) 워밍업: 버퍼 부족 → 휴리스틱 + Phase 1/2/3 gate 적용 ──
+        # 워밍업 단계에서는 fall_emergency 까지 도달 가능하지만 latch 는 warmup=True 로 차단.
         if not buffer_full:
             suppressed = False
             suppression_reason = None
@@ -947,7 +1071,7 @@ class FallDetector:
 
             # 휴리스틱이 fall 을 외칠 때만 후처리 적용
             if heuristic_is_fall and kin_signals["samples"] >= KIN_MIN_SAMPLES_FOR_SUPPRESSION:
-                # Phase 1: 정적 누움 → 강한 suppress
+                # Phase 1: 정적 누움
                 if (kin_signals["vertical_drop"] < self.VERTICAL_DROP_MIN
                         and kin_signals["motion_score"] < self.MOTION_SCORE_MIN):
                     suppressed = True
@@ -956,7 +1080,7 @@ class FallDetector:
                         f"{self.VERTICAL_DROP_MIN:.4f} & motion="
                         f"{kin_signals['motion_score']:.5f}<{self.MOTION_SCORE_MIN:.5f}"
                     )
-                # Phase 2: 천천히 눕기 → counter reset (HOLD → RESET 으로 변경)
+                # Phase 2: 천천히 눕기
                 elif self._is_slow_transition(kin_signals):
                     is_transitioning = True
                     transition_state = (
@@ -996,15 +1120,21 @@ class FallDetector:
             else:
                 status, final_decision = "emergency", "fall_emergency"
 
-            alert_triggered = (final_decision == "fall_emergency")
-            alert_reason = (
-                f"warmup_heuristic: count={count}>=EMERGENCY_THRESHOLD={self.EMERGENCY_THRESHOLD}"
-                f" & dynamic_event=True"
-                if alert_triggered else None
+            # 사건 latch 적용 — warmup=True 로 latch 활성화 차단
+            final_decision, status, alert_triggered, alert_reason, incident_meta = (
+                self._apply_incident_latch(
+                    camera_id, final_decision, status, count,
+                    model_backend="warmup",
+                    model_prediction="warmup",
+                    fall_probability=0.0,
+                    dynamic_event=warmup_dynamic_event,
+                    warmup=True,
+                )
             )
+            if incident_meta["fall_incident_active"]:
+                suppression_reason = None
+                transition_state = None
 
-            # 워밍업 단계도 dynamic event gate 정보 노출 — UI 일관성
-            warmup_dynamic_event, warmup_dynamic_reason = self._compute_dynamic_event(kin_signals)
             return {
                 "detected": alert_triggered,
                 "alert_triggered": alert_triggered,
@@ -1017,6 +1147,8 @@ class FallDetector:
                 "transition_state": transition_state,
                 "dynamic_fall_event": warmup_dynamic_event,
                 "dynamic_gate_reason": warmup_dynamic_reason,
+                "latch_allowed": incident_meta["latch_allowed"],
+                "latch_block_reason": incident_meta["latch_block_reason"],
                 "vertical_drop": kin_signals["vertical_drop"],
                 "motion_score": kin_signals["motion_score"],
                 "torso_angle_change": kin_signals["torso_angle_change"],
@@ -1025,6 +1157,10 @@ class FallDetector:
                 "recent_torso_angle_change": kin_signals["torso_angle_change"],
                 "consecutive_fall_windows": count,
                 "pending_windows": max(0, self.EMERGENCY_THRESHOLD - count) if count > 0 else 0,
+                "fall_incident_active": incident_meta["fall_incident_active"],
+                "incident_state": incident_meta["incident_state"],
+                "fall_incident_started_at": incident_meta["fall_incident_started_at"],
+                "fall_incident_id": incident_meta["fall_incident_id"],
                 "type": "FALL",
                 "status": status,
                 "buffered": len(self.frame_buffers[camera_id]),
@@ -1144,13 +1280,30 @@ class FallDetector:
                 final_decision = "fall_suspected"
                 status = "suspected"
 
-        # 알림은 fall_emergency 확정 시에만
-        alert_triggered = (final_decision == "fall_emergency")
-        alert_reason = (
-            f"confirmed_dynamic_fall: count={count}>=EMERGENCY_THRESHOLD={self.EMERGENCY_THRESHOLD}"
-            f" & dynamic_event=True & lstm_fall=True"
-            if alert_triggered else None
+        # ── 사건 latch 적용 — 모든 게이트 통과 시에만 활성화 ────────────────
+        # backend 식별자 (get_model_info 와 일관)
+        if _lstm_backend == "torch_vB":
+            backend_name = "pytorch_vB"
+        elif _lstm_backend == "keras":
+            backend_name = "keras_vB"
+        elif _lstm_backend == "torch_legacy":
+            backend_name = "pytorch_fallback"
+        else:
+            backend_name = "heuristic"
+        final_decision, status, alert_triggered, alert_reason, incident_meta = (
+            self._apply_incident_latch(
+                camera_id, final_decision, status, count,
+                model_backend=backend_name,
+                model_prediction=model_pred_name,
+                fall_probability=float(fall_prob),
+                dynamic_event=dynamic_event,
+                warmup=False,  # LSTM-active branch — not warmup
+            )
         )
+        # latch 가 활성이면 lying suppression / transition 표시도 가리지 않음
+        if incident_meta["fall_incident_active"]:
+            suppression_reason = None
+            transition_state = None
         # pending 단계에서 EMERGENCY 까지 남은 프레임 수
         pending_windows = max(0, self.EMERGENCY_THRESHOLD - count) if count > 0 else 0
 
@@ -1183,6 +1336,9 @@ class FallDetector:
             # NEW: dynamic event gate 신호
             "dynamic_fall_event": dynamic_event,
             "dynamic_gate_reason": dynamic_gate_reason,
+            # latch 게이트 가시화 (warmup/backend/prob/dynamic 가드 결과)
+            "latch_allowed": incident_meta["latch_allowed"],
+            "latch_block_reason": incident_meta["latch_block_reason"],
             # kinematic signals — 'recent_*' 는 동일 값의 명시적 이름 (API 일관성)
             "vertical_drop": kin_signals["vertical_drop"],
             "motion_score": kin_signals["motion_score"],
@@ -1192,6 +1348,11 @@ class FallDetector:
             "recent_torso_angle_change": kin_signals["torso_angle_change"],
             "consecutive_fall_windows": count,
             "pending_windows": pending_windows,
+            # NEW: 사건 latch 정보
+            "fall_incident_active": incident_meta["fall_incident_active"],
+            "incident_state": incident_meta["incident_state"],
+            "fall_incident_started_at": incident_meta["fall_incident_started_at"],
+            "fall_incident_id": incident_meta["fall_incident_id"],
             # legacy/호환 필드 유지 (test_fall_api 의 'method' 검증용)
             "type": "FALL",
             "status": status,
@@ -1202,10 +1363,16 @@ class FallDetector:
         }
 
     def reset(self, camera_id: str = "default"):
+        """카운터 / 버퍼 / 사건 latch 모두 초기화."""
         self.fall_counters[camera_id] = 0
         self.frame_buffers[camera_id].clear()
         self.kin_buffers[camera_id].clear()
         self.lstm_started[camera_id] = False
+        # 낙상 사건 해제 — 명시적 reset 에서만 가능
+        self.fall_incident_active[camera_id] = False
+        self.fall_incident_started_at[camera_id] = None
+        self.fall_incident_id[camera_id] = None
+        self.last_alert_at[camera_id] = None
 
 
 fall_detector = FallDetector()

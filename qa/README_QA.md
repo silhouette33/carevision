@@ -261,8 +261,9 @@ py qa/evaluate_new_video_windows.py --fall-prob-thr 0.3 --fall-min-windows 1  # 
 | `FALL_VERTICAL_DROP_MIN` | recent hip_y 변화량 (lying suppression / dynamic gate) | `0.10` | 0.0~1.0 |
 | `FALL_MOTION_SCORE_MIN` | recent \|Δhip_y\| 평균 (lying suppression) | `0.005` | 0.0~1.0 |
 | `FALL_SLOW_MOTION_MAX` | 이 미만 motion = 천천히 눕기 후보 | `0.020` | 0.0~1.0 |
-| `FALL_DYNAMIC_MOTION_MIN` | **dynamic event gate motion 최소치** (NEW) | `0.020` | 0.0~1.0 |
-| `FALL_TORSO_CHANGE_MIN` | **dynamic event gate torso 회전 최소치(°)** (NEW) | `30.0` | 0.0~180.0 |
+| `FALL_DYNAMIC_MOTION_MIN` | dynamic event gate motion 최소치 | `0.020` | 0.0~1.0 |
+| `FALL_TORSO_CHANGE_MIN` | dynamic event gate torso 회전 최소치(°) | `30.0` | 0.0~180.0 |
+| `FALL_ALERT_COOLDOWN_SECONDS` | 사건 latch reminder 알림 주기(초). 0 = 최초 1회만 | `0.0` | 0~86400 |
 
 > 실제 emergency 트리거는 `EMERGENCY_THRESHOLD = max(FALL_CONSECUTIVE_THRESHOLD, FALL_CONFIRM_WINDOWS+1)` 프레임.
 > default 조합 (3, 3) 에서는 `4` 프레임에서 emergency 가 발화된다 (fall_suspected 가 1 프레임 fire).
@@ -332,6 +333,54 @@ uvicorn ai.main:app --reload --port 8000
 > `movement_pending` 으로 자동 변환해 표시. 알림 트리거도 `alert_triggered=true` AND
 > `dynamic_fall_event=true` 둘 다 충족할 때만 발화.
 
+### Latch 게이트
+
+`fall_emergency` 와 `fall_incident_active` 활성화는 다음 **모든 조건** 을 만족할 때만 허용:
+- `model_backend == "pytorch_vB"`
+- `model_prediction == "Fall"`
+- `fall_probability ≥ FALL_PROB_THRESHOLD`
+- `dynamic_fall_event == True`
+- `warmup == False`
+- `consecutive_fall_windows ≥ EMERGENCY_THRESHOLD`
+
+하나라도 미달이면 `latch_allowed=False`, `latch_block_reason` 에 사유 기록, 상태는
+`fall_suspected` 강등 및 알림 차단. 워밍업 (LSTM 미활성) 단계의 latch 활성화는
+`warmup=True` 가드로 차단된다.
+
+> **참고**: 푸시업/플랭크/엎드린 활동 같은 "낮은 자세 + 동적" 동작에 대한 별도
+> exercise suppression 은 9차에서 시도했으나 실제 낙상까지 억제되어 10차에서 revert 했다.
+> 푸시업 오탐은 알려진 한계로 남기고, 추후 데이터셋 보강이나 별도 클래스 학습으로
+> 해결할 예정.
+
+### 낙상 사건 latch (incident state)
+
+`fall_emergency` 가 한 번 확정되면 **명시적 reset 까지 사건 상태를 유지** 한다. 사람이
+바닥에 오래 누워있어 motion/drop 이 줄어들어도 자동으로 `lying_suppressed` / `normal` /
+`movement_pending` 으로 돌아가지 않는다.
+
+| 필드 | 의미 |
+|---|---|
+| `fall_incident_active` | `true` = 사건 진행 중 (latch 활성) |
+| `incident_state` | `"active"` 또는 `"inactive"` |
+| `fall_incident_started_at` | unix timestamp (사건 시작 시각) |
+| `fall_incident_id` | `FALL_<ms>_<camera_id>` 고유 ID |
+
+알림 게이팅:
+- 최초 `fall_emergency` 확정 시: `alert_triggered=true` (1회 발화)
+- 이후 incident active 동안: `alert_triggered=false` (반복 알림 X)
+- `FALL_ALERT_COOLDOWN_SECONDS > 0` 이면 그 주기마다 reminder 알림 1회 발화
+
+해제 방법:
+- `POST /detect/reset` (프론트 "사건 해제" 버튼) → counter / kinematics buffer / lstm_started /
+  fall_incident_active 모두 초기화 → 정상 감지 재개
+- 백엔드의 `FallDetector.reset()` 이 모든 per-camera state 를 깔끔히 비운다.
+
+프론트 표시:
+- `fall_incident_active=true` 인 동안 화면 라벨 `🚨 낙상 발생 — 확인 필요` (빨강 + 펄스)
+- 사건 active 배너 + 빨간 "사건 해제" 버튼 노출 — `lying_suppressed` 가 와도 무시되고
+  계속 사건 라벨 유지
+- 디버그 스트립에 `incident: active/inactive` 칩 + `fall_incident_id` 표시
+
 ### Lying suppression (오탐 억제)
 
 낮은 외부 metric 으로도 "누워서 자는 상태" 가 Fall 로 오탐되는 문제를 해결하기 위해
@@ -395,15 +444,18 @@ uvicorn ai.main:app --reload --port 8000
 
 ### 테스트 케이스별 기대 시그널 + 알림 게이팅
 
-| 시나리오 | model_prediction | fall_probability | drop | motion | torso_Δ | dynamic_fall_event | final_decision (시간 진행) | 화면 라벨 | alert_triggered |
-|---|---|---|---|---|---|---|---|---|---|
-| 정상 서있음 | Standing/Walking | <0.3 | 작음 | 작음 | 작음 | false | `normal` | 정상 | **false** |
-| 걷기 | Walking | 낮음 | 중간 | 중간 | 작음 | false | `normal` | 정상 | **false** |
-| 앉기 | Sitting | 낮~중 | 중 | 중 | 중 | false | `normal` 또는 일시 `movement_pending` | 정상/판정 중 | **false** |
-| **천천히 눕기** | Lying_Down/Fall | 변동 | ≥0.10 | <0.020 | 중~↑ | **false** | `movement_pending` → `lying_suppressed` | **판정 중 → 누워 있음** | **false** |
-| 누워서 자기 | Lying_Down/Fall | 변동 | ≈0 | ≈0 | ≈0 | **false** | `lying_suppressed` | 누워 있음 | **false** |
-| 누운 뒤 모델이 Fall 튐 | Fall | 높음 | ≈0 | ≈0 | ≈0 | **false** | `lying_suppressed` (`static_no_dynamic_event`) | 누워 있음 | **false** |
-| 실제 낙상 | Fall | ≥0.65 | ≥0.10 | ≥0.020 | ≥30° | **true** | `movement_pending`(1~2프) → `fall_suspected`(3프) → `fall_emergency`(4프+) | 판정 중 → 낙상 의심 → 낙상 발생 | **true** |
+| 시나리오 | model_prediction | fall_probability | drop | motion | torso_Δ | dynamic_fall_event | latch_allowed | final_decision | 화면 라벨 | alert_triggered |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 정상 서있음 | Standing/Walking | <0.3 | 작음 | 작음 | 작음 | false | varies | `normal` | 정상 | **false** |
+| **푸시업/플랭크/엎드려 움직임 (한계)** | Lying_Down/Fall | 변동 | 변동 | 변동 | 변동 | varies | varies | 잘못 fall_* 또는 lying_suppressed 가능 | 정상 보장 안됨 (알려진 오탐) | 가능성 있음 |
+| 걷기 | Walking | 낮음 | 중간 | 중간 | 작음 | false | false | `normal` | 정상 | **false** |
+| 앉기 | Sitting | 낮~중 | 중 | 중 | 중 | false | false | `normal` 또는 일시 `movement_pending` | 정상/판정 중 | **false** |
+| 천천히 눕기 | Lying_Down/Fall | 변동 | ≥0.10 | <0.020 | 중~↑ | **false** | false | `movement_pending` → `lying_suppressed` | 판정 중 → 누워 있음 | **false** |
+| 누워서 자기 | Lying_Down/Fall | 변동 | ≈0 | ≈0 | ≈0 | **false** | false | `lying_suppressed` | 누워 있음 | **false** |
+| 누운 뒤 모델이 Fall 튐 | Fall | 높음 | ≈0 | ≈0 | ≈0 | **false** | false | `lying_suppressed` | 누워 있음 | **false** |
+| **실제 낙상 (최초 4프)** | Fall | ≥0.65 | ≥0.10 | ≥0.020 | ≥30° | **true** | **true (latch on)** | `movement_pending` → `fall_suspected` → `fall_emergency` | 판정 중 → 낙상 의심 → **낙상 발생 — 확인 필요** | **true (1회)** |
+| **낙상 후 계속 누워있음** | Lying_Down 등 | 변동 | ≈0 | ≈0 | ≈0 | false | **true (latch 유지)** | `fall_emergency` (강제) | **낙상 발생 — 확인 필요 (유지)** | **false** |
+| **사건 해제 후 다시 누워있음** | Lying_Down | 변동 | ≈0 | ≈0 | ≈0 | false | false | `lying_suppressed` | 누워 있음 | **false** |
 
 > **중요**: "천천히 눕기" 행에서 brief motion spike 가 발생해도 Phase 2 RESET 덕분에
 > counter 가 누적되지 않아 `fall_suspected` 라벨이 절대 노출되지 않는다. dynamic_event=False
@@ -495,6 +547,7 @@ set FALL_MOTION_SCORE_MIN=0.005
 set FALL_SLOW_MOTION_MAX=0.020
 set FALL_DYNAMIC_MOTION_MIN=0.020
 set FALL_TORSO_CHANGE_MIN=30.0
+set FALL_ALERT_COOLDOWN_SECONDS=0      # 0 = 최초 1회만 알림 / 60 = 60초마다 reminder
 export FALL_PROB_THRESHOLD=0.65      # Linux/Mac
 export FALL_CONFIRM_WINDOWS=3
 export FALL_CONSECUTIVE_THRESHOLD=3
@@ -503,6 +556,7 @@ export FALL_MOTION_SCORE_MIN=0.005
 export FALL_SLOW_MOTION_MAX=0.020
 export FALL_DYNAMIC_MOTION_MIN=0.020
 export FALL_TORSO_CHANGE_MIN=30.0
+export FALL_ALERT_COOLDOWN_SECONDS=0
 uvicorn ai.main:app --reload --port 8000   # PT vB 가 있으면 자동 채택 (1순위)
 ```
 
@@ -528,6 +582,9 @@ uvicorn ai.main:app --reload --port 8000   # PT vB 가 있으면 자동 채택 (
 | 2026-05-02 | (5차) **Movement pending state machine** — 눕는 중간 단계가 일시적으로 emergency 로 잡혀 알림이 먼저 나가던 문제 해결. (1) `FALL_CONFIRM_WINDOWS` (default 3) + `FALL_SLOW_MOTION_MAX` (default 0.020) env 추가. (2) 3-way counter: 천천히 눕기(`drop≥MIN` AND `motion<SLOW_MAX`) 감지 시 counter HOLD → `movement_pending` 유지 → 자세 안정 후 `lying_suppressed` 자연 전이. (3) 알림 게이팅을 `status=='emergency'` 비교에서 `alert_triggered=true` flag 로 명확화 — `routes.py` + 프론트 동시 갱신. 알림은 오직 `final_decision=='fall_emergency'` 일 때만 발화. (4) 응답에 `alert_triggered`, `alert_reason`, `transition_state`, `pending_windows` 4개 필드 추가. (5) CameraPage 5-state UI (정상 / 판정 중 / 낙상 의심 / 낙상 발생 / 누워 있음). |
 | 2026-05-02 | (6차) **Dynamic event gate** — 누운 뒤 정지 상태에서 모델이 Fall 로 튀어도 emergency 까지 가던 잔존 문제 해결. (1) `FALL_DYNAMIC_MOTION_MIN` (default 0.020) + `FALL_TORSO_CHANGE_MIN` (default 30°) env 추가. (2) `_compute_dynamic_event()` 가 (drop, motion, torso_angle_change) 셋이 모두 fall-like 임계 이상일 때만 True. (3) `dynamic_fall_event=False` 면 즉시 suppress (`static_no_dynamic_event`) → counter 증가 차단. (4) 최종 emergency 게이트: `count >= EMERGENCY_THRESHOLD` AND `dynamic_event=True` AND `lstm_fall=True` 모두 충족 시에만 `fall_emergency` — 셋 중 하나라도 미달이면 `fall_suspected` 강등. (5) 응답에 `dynamic_fall_event`, `dynamic_gate_reason`, `recent_*` 5개 필드 추가. (6) CameraPage 디버그 스트립에 `dyn_event ✓/✗` 칩 + 사유 표시. |
 | 2026-05-02 | (7차) **엄격 게이팅 — 천천히 눕는 중 fall_suspected 잔존 문제** 해결. (1) Phase 2 (slow transition) 의 counter 동작을 HOLD → **RESET** 으로 변경 — 천천히 눕는 중 brief motion spike 가 누적되어 fall_suspected 까지 가던 케이스 차단. (2) 상태 머신에 `elif not dynamic_event` 분기 추가 — counter 가 양수여도 현재 dynamic_event=False 면 fall_* 라벨 절대 노출 X (movement_pending 또는 normal 로 강제). (3) 워밍업 분기에도 동일 dynamic_event gate + Phase 3 정적-while-Fall suppress 적용. (4) 프론트 CameraPage 가 backend 가 보낸 fall_suspected/fall_emergency 를 dynamic_event=false 면 movement_pending 으로 자동 변환 (방어 가드). 알람 트리거도 `alert_triggered=true AND dynamic_fall_event=true` 둘 다 요구. |
+| 2026-05-02 | (10차) **9차 exercise suppression revert** — 푸시업/플랭크/엎드린 활동 억제용 `_is_exercise_like_motion` 게이트가 실제 급격한 낙상까지 `activity_suppressed` 로 잘못 잡는 부작용 발생. 푸시업 오탐은 알려진 한계로 받아들이고 다음을 모두 되돌림: `_is_exercise_like_motion()` 메서드 / `EXERCISE_*` 4개 env / 4개 `DEFAULT_FALL_EXERCISE_*` 상수 / `_apply_incident_latch` 의 exercise_like_motion 게이트 / LSTM-active + 워밍업 + YOLO 분기의 exercise call / state machine 의 `activity_suppressed` 분기 / 응답의 `exercise_like_motion` & `exercise_gate_reason` & `warmup_blocked` 필드 / CameraPage 의 `activity_suppressed` 라벨 + 4-tier fallKey + 디버그 스트립 exercise 칩 + alert 트리거 exerciseLike 가드. 유지: `pytorch_vB` 로드 / lying suppression / movement_pending / dynamic_fall_event gate / alert_triggered 알림 / `fall_incident_active` latch / 사건 해제 버튼 / latch warmup 차단 / latch_allowed/latch_block_reason 디버그 노출. |
+| 2026-05-02 | (9차) **Exercise-like motion suppression + warmup latch 차단** — 푸시업/플랭크/엎드린 활동 오탐 차단 + warmup 단계의 latch 활성화 차단. (1) 4개 env 신규: `FALL_EXERCISE_TORSO_MIN=60°` / `FALL_EXERCISE_HIP_Y_MIN=0.40` / `FALL_EXERCISE_MOTION_MIN=0.003` / `FALL_EXERCISE_ANGLE_STABLE_MAX=15°`. (2) `_is_exercise_like_motion()` 헬퍼: torso 수평 + 낮은 위치 + 활동 motion + 안정 torso 4 조건 모두 충족 시 활성화. (3) 활성화 시 `final_decision="activity_suppressed"`, counter reset, alert 차단. (4) `_apply_incident_latch()` 가 7개 게이트 검사 (backend / pred / prob / dynamic_event / exercise_like / warmup / count) — 하나라도 미달이면 `latch_allowed=false` + `latch_block_reason` 노출, fall_suspected 강등. (5) 워밍업 분기는 무조건 `warmup=True` 로 호출 → latch 영구 차단. 워밍업 상태머신 캡: 최대 `movement_pending`. (6) API 응답에 `exercise_like_motion` / `exercise_gate_reason` / `warmup_blocked` / `latch_allowed` / `latch_block_reason` 5개 필드 추가. (7) CameraPage: `activity_suppressed` → 💪 "활동 중" (emerald), 디버그 스트립에 `exercise ✓/✗` / `warmup blocked` / `latch allowed/blocked` chip + 사유 라인. exercise_like_motion=true 시 알림 트리거에서도 추가 가드. |
+| 2026-05-02 | (8차) **낙상 사건 latch (incident state)** — 낙상 확정 후 사람이 오래 누워있을 때 lying_suppressed 로 자동 전이되던 문제 해결. (1) 새 상태: `fall_incident_active` / `incident_state` / `fall_incident_started_at` / `fall_incident_id` (per-camera). (2) `_apply_incident_latch()` 메서드가 fall_emergency 1회 확정 시 latch 활성화 → 명시적 reset 까지 final_decision 강제 유지. lying_suppressed/normal/movement_pending 으로 자동 전이 차단. (3) `FALL_ALERT_COOLDOWN_SECONDS` env (default 0 = 최초 1회만, >0 = reminder 주기). (4) `reset()` 가 모든 사건 state 도 함께 초기화. (5) 응답에 `fall_incident_active`, `incident_state`, `fall_incident_started_at`, `fall_incident_id` 추가. (6) CameraPage 에 빨간 사건 active 배너 + "사건 해제" 버튼 + 디버그 스트립에 `incident: active/inactive` 표시. |
 
 세부 이력은 git log 참조.
 
