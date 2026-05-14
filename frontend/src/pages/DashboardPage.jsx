@@ -1,303 +1,557 @@
 import { useState, useEffect } from 'react';
-import { api } from '../api/client';
-import logo from '../assets/CareVision.png';
-import { colors, layout, button } from '../styles/common';
+import {
+    Bell,
+    ShieldCheck,
+    Pill,
+    Activity,
+    ZapOff,
+    Info,
+    Lock,
+    Phone,
+    ChevronRight,
+    AlertTriangle,
+    Users
+} from 'lucide-react';
 
-export default function DashboardPage({
-                                          user,
-                                          onLogout,
-                                          onSelectPatient,
-                                          onGoNotifications,
-                                          onEmergency,
-                                      }) {
+import { api } from '../api/client';
+import logo from '../assets/Logo.png';
+import HistoryPage from './HistoryPage.jsx';
+
+export default function DashboardPage({ onNavigate, onPatientsLoaded }) {
+
     const [patients, setPatients] = useState([]);
-    const [medSummary, setMedSummary] = useState({});
-    const [showForm, setShowForm] = useState(false);
-    const [activeTab, setActiveTab] = useState('home');
-    const [newPatient, setNewPatient] = useState({
-        name: '', age: '', address: '', phone: '', cameraId: '',
-    });
+    const [selectedPatientId, setSelectedPatientId] = useState(null);
+
+    const [detectionStatus, setDetectionStatus] = useState({});
+
+    const [isPrivacyMode, setIsPrivacyMode] = useState(true);
+
+    const [showSummary, setShowSummary] = useState(false);
+
+    const [showCallActions, setShowCallActions] = useState(false);
+
+    const [showPinModal, setShowPinModal] = useState(false);
+
+    const [pin, setPin] = useState('');
+
+    const [showHistory, setShowHistory] = useState(false);
 
     useEffect(() => {
-        fetchPatients();
+
+        const init = async () => {
+
+            const savedPatients =
+                JSON.parse(localStorage.getItem('patients')) || [];
+
+            const data = await api.getPatients();
+
+            const extra = [
+                {
+                    id: 3,
+                    name: '박명수',
+                    age: 75,
+                    address: '서울 강남구',
+                    cameraId: 'cam-3'
+                },
+                {
+                    id: 4,
+                    name: '최영희',
+                    age: 80,
+                    address: '서울 송파구',
+                    cameraId: 'cam-4'
+                },
+            ];
+
+            const all = [...data, ...extra, ...savedPatients];
+
+            setPatients(all);
+
+            onPatientsLoaded?.(all);
+
+            if (all.length > 0 && !selectedPatientId) {
+                setSelectedPatientId(all[0].id);
+            }
+
+            const statusMap = {};
+
+            all.forEach(p => {
+
+                if (p.id === 3) {
+                    statusMap[p.id] = 'FALL';
+                }
+                else if (p.id === 4) {
+                    statusMap[p.id] = 'INACTIVITY';
+                }
+                else {
+                    statusMap[p.id] = 'NORMAL';
+                }
+            });
+
+            setDetectionStatus(statusMap);
+        };
+
+        init();
+
     }, []);
 
-    const fetchPatients = async () => {
-        const data = await api.getPatients();
-        const extra = [
-            { id: 3, name: '박명수', age: 75, address: '서울 강남구', phone: '010-1111-2222', cameraId: 'cam-3' },
-            { id: 4, name: '최영희', age: 80, address: '서울 송파구', phone: '010-3333-4444', cameraId: 'cam-4' },
-            { id: 5, name: '정미자', age: 77, address: '서울 서초구', phone: '010-5555-6666', cameraId: 'cam-5' },
-            { id: 6, name: '한상철', age: 83, address: '서울 마포구', phone: '010-7777-8888', cameraId: 'cam-6' },
-            { id: 7, name: '윤복례', age: 79, address: '서울 은평구', phone: '010-9999-0000', cameraId: 'cam-7' },
-            { id: 8, name: '강대식', age: 81, address: '서울 중랑구', phone: '010-2222-3333', cameraId: 'cam-8' },
-        ];
-        const all = [...data, ...extra];
-        setPatients(all);
-        fetchMedSummaries(all);
+    // PIN 완료 시 히스토리 이동
+    useEffect(() => {
+
+        if (pin.length === 4) {
+
+            setTimeout(() => {
+
+                setShowPinModal(false);
+
+                setPin('');
+
+                setShowHistory(true);
+
+            }, 200);
+        }
+
+    }, [pin]);
+
+    const selectedPatient =
+        patients.find(p => p.id === selectedPatientId);
+
+    const currentDet =
+        detectionStatus[selectedPatientId] || 'NORMAL';
+
+    const getHeaderMessage = (type) => {
+
+        if (type === 'FALL') {
+
+            return {
+                sub: "낙상 감지 위험 단계",
+                main: "낙상 위험 상황으로 판단됩니다.",
+                color: "text-red-300"
+            };
+        }
+
+        if (type === 'INACTIVITY') {
+
+            return {
+                sub: "무동작 감지 주의 단계",
+                main: "장시간 움직임이 없습니다.",
+                color: "text-orange-300"
+            };
+        }
+
+        return {
+            sub: "AI 실시간 모니터링",
+            main: "안전하게 잘 계세요.",
+            color: "text-yellow-300"
+        };
     };
 
-    const EXTRA_MED_MOCK = {
-        3: { total: 3, taken: 3, missed: 0 },
-        4: { total: 2, taken: 1, missed: 1 },
-        5: { total: 4, taken: 2, missed: 0 },
-        6: { total: 3, taken: 0, missed: 2 },
-        7: { total: 2, taken: 2, missed: 0 },
-        8: { total: 3, taken: 1, missed: 1 },
-    };
+    if (showHistory && selectedPatient) {
 
-    const fetchMedSummaries = async (patientList) => {
-        const summaries = {};
-        await Promise.all(patientList.map(async (p) => {
-            try {
-                const meds = await api.getMedications(p.id);
-                const logs = await api.getMedicationLogs(p.id);
-                const total = meds.length;
-                const taken = logs.filter(l => l.status === 'TAKEN').length;
-                const missed = logs.filter(l => l.status === 'MISSED').length;
-                if (total > 0) {
-                    summaries[p.id] = { total, taken, missed };
-                } else if (EXTRA_MED_MOCK[p.id]) {
-                    summaries[p.id] = EXTRA_MED_MOCK[p.id];
-                } else {
-                    summaries[p.id] = { total: 0, taken: 0, missed: 0 };
-                }
-            } catch {
-                summaries[p.id] = EXTRA_MED_MOCK[p.id] || { total: 0, taken: 0, missed: 0 };
-            }
-        }));
-        setMedSummary(summaries);
-    };
-
-    const handleAddPatient = (e) => {
-        e.preventDefault();
-        const newData = { id: Date.now(), ...newPatient };
-        setPatients(prev => [newData, ...prev]);
-        setNewPatient({ name: '', age: '', address: '', phone: '', cameraId: '' });
-        setShowForm(false);
-    };
-
-    const handleDelete = (id) => {
-        setPatients(prev => prev.filter(p => p.id !== id));
-    };
-
-    const getMedStatus = (id) => {
-        const s = medSummary[id];
-        if (!s || s.total === 0) return null;
-        return { ...s, unconfirmed: s.total - s.taken - s.missed };
-    };
+        return (
+            <HistoryPage
+                patient={selectedPatient}
+                onBack={() => setShowHistory(false)}
+            />
+        );
+    }
 
     return (
-        <div style={styles.pageWrapper}>
 
-            <div style={styles.scrollArea}>
+        <div className="max-w-[480px] mx-auto min-h-screen bg-gray-50 pb-10 relative overflow-x-hidden font-sans shadow-2xl">
 
-                {/* 헤더 */}
-                <div style={styles.header}>
-                    <div style={styles.logo}>
-                        <img src={logo} alt="logo" style={styles.logoImg} />
-                        <span style={styles.logoText}>CareVision</span>
+            {/* 헤더 */}
+            <div className="px-5 pt-6 pb-12 rounded-b-[40px] shadow-lg bg-blue-600">
+
+                <div className="flex justify-between items-center mb-6">
+
+                    <div className="flex items-center gap-3">
+
+                        <img
+                            src={logo}
+                            alt="Logo"
+                            className="w-8 h-8 object-contain bg-white/20 p-1 rounded-lg"
+                        />
+
+                        <div>
+
+                            <div className="text-white text-lg font-bold tracking-tight">
+                                CareVision
+                            </div>
+
+                            <div className="text-white/60 text-[9px] font-black uppercase tracking-widest">
+                                Guardian
+                            </div>
+                        </div>
                     </div>
-                    <button style={styles.emergencyBtn}
-                            onClick={() => { if (patients.length > 0) onEmergency(patients[0]); }}>
-                        🚨 긴급
+
+                    <button className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center border-none">
+
+                        <Bell size={20} className="text-white" />
+
                     </button>
                 </div>
 
-                {/* 타이틀 + 추가 버튼 */}
-                <div style={styles.topBar}>
-                    <span style={styles.title}>환자 목록</span>
-                    <button style={styles.addBtn} onClick={() => setShowForm(!showForm)}>
-                        + 추가
-                    </button>
+                {/* 환자 슬라이더 */}
+                <div className="flex overflow-x-auto gap-2.5 mb-8 no-scrollbar p-1">
+
+                    {patients.map(p => (
+
+                        <button
+                            key={p.id}
+                            onClick={() => setSelectedPatientId(p.id)}
+                            className={`px-6 py-2.5 text-[13px] rounded-full whitespace-nowrap transition-all duration-300 font-bold border-none
+                            
+                            ${
+                                selectedPatientId === p.id
+                                    ? 'bg-white text-blue-600 shadow-md scale-105'
+                                    : 'bg-white/15 text-white/60'
+                            }`}
+                        >
+                            {p.name}
+                        </button>
+                    ))}
                 </div>
 
-                {/* 추가 폼 */}
-                {showForm && (
-                    <div style={styles.formCard}>
-                        <h3 style={styles.formTitle}>환자 추가</h3>
-                        <form onSubmit={handleAddPatient} style={styles.form}>
-                            <input placeholder="이름" value={newPatient.name}
-                                   onChange={e => setNewPatient({ ...newPatient, name: e.target.value })}
-                                   style={styles.input} required />
-                            <input placeholder="나이" type="number" value={newPatient.age}
-                                   onChange={e => setNewPatient({ ...newPatient, age: e.target.value })}
-                                   style={styles.input} />
-                            <input placeholder="주소" value={newPatient.address}
-                                   onChange={e => setNewPatient({ ...newPatient, address: e.target.value })}
-                                   style={styles.input} />
-                            <input placeholder="전화번호" value={newPatient.phone}
-                                   onChange={e => setNewPatient({ ...newPatient, phone: e.target.value })}
-                                   style={styles.input} />
-                            <input placeholder="카메라 ID" value={newPatient.cameraId}
-                                   onChange={e => setNewPatient({ ...newPatient, cameraId: e.target.value })}
-                                   style={styles.input} />
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                                <button style={{ ...button.primary, flex: 1 }} type="submit">추가</button>
-                                <button type="button" style={styles.cancelBtn}
-                                        onClick={() => setShowForm(false)}>취소</button>
+                {/* 메인 상태 문구 */}
+                {selectedPatient && (() => {
+
+                    const msg = getHeaderMessage(currentDet);
+
+                    return (
+
+                        <div className="animate-in fade-in slide-in-from-left-4">
+
+                            <p className="text-white/70 text-xs font-bold mb-1">
+                                {msg.sub}
+                            </p>
+
+                            <h2 className="text-white text-2xl font-black leading-tight">
+
+                                {selectedPatient.name}님은 현재
+                                <br/>
+
+                                <span className={msg.color}>
+                                    {msg.main}
+                                </span>
+                            </h2>
+                        </div>
+                    );
+
+                })()}
+            </div>
+
+            {/* 카드 */}
+            <div className="px-5 -mt-6 space-y-5">
+
+                <div className="grid grid-cols-2 gap-4">
+
+                    {[
+                        {
+                            id: 'fall',
+                            title: '낙상 감지',
+                            status: currentDet === 'FALL' ? '위험' : '안전',
+                            icon: ShieldCheck,
+                            color: 'text-red-500',
+                            isAlert: currentDet === 'FALL'
+                        },
+                        {
+                            id: 'med',
+                            title: '오늘 복약',
+                            status: '2/3',
+                            icon: Pill,
+                            color: 'text-violet-500',
+                            isAlert: false
+                        },
+                        {
+                            id: 'activity',
+                            title: '활동 상태',
+                            status: '양호',
+                            icon: Activity,
+                            color: 'text-emerald-500',
+                            isAlert: false
+                        },
+                        {
+                            id: 'inactivity',
+                            title: '무동작 감지',
+                            status: currentDet === 'INACTIVITY' ? '주의' : '정상',
+                            icon: ZapOff,
+                            color: 'text-orange-500',
+                            isAlert: currentDet === 'INACTIVITY'
+                        }
+
+                    ].map((card) => (
+
+                        <button
+                            key={card.id}
+                            onClick={() => onNavigate?.('fall', selectedPatient)}
+                            className={`p-5 rounded-[28px] flex flex-col justify-between h-32 transition-all active:scale-95 text-left border-none shadow-sm
+                            
+                            ${
+                                card.isAlert
+                                    ? 'bg-red-500 text-white animate-pulse'
+                                    : 'bg-white'
+                            }`}
+                        >
+
+                            <card.icon
+                                size={24}
+                                className={card.isAlert ? 'text-white' : card.color}
+                            />
+
+                            <div>
+
+                                <p className={`text-[11px] font-bold ${
+                                    card.isAlert
+                                        ? 'text-white/70'
+                                        : 'text-gray-400'
+                                }`}>
+                                    {card.title}
+                                </p>
+
+                                <p className="text-lg font-black">
+                                    {card.status}
+                                </p>
                             </div>
-                        </form>
+                        </button>
+                    ))}
+                </div>
+
+                {/* 프로필 */}
+                <div className="bg-white rounded-[35px] p-6 shadow-md">
+
+                    <div className="flex items-center gap-4 mb-6">
+
+                        <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center font-black text-xl">
+
+                            {selectedPatient?.name[0]}
+
+                        </div>
+
+                        <div className="flex-1">
+
+                            <p className="text-sm font-black text-gray-900">
+                                {selectedPatient?.name}님
+                            </p>
+
+                            <p className="text-[11px] text-gray-400 font-bold">
+                                {selectedPatient?.age}세 · {selectedPatient?.address}
+                            </p>
+                        </div>
                     </div>
-                )}
 
-                {/* 환자 카드 그리드 */}
-                <div style={styles.grid}>
-                    {patients.map(p => {
-                        const med = getMedStatus(p.id);
-                        return (
-                            <div key={p.id} style={styles.card}>
-                                <div style={styles.avatar}>{p.name?.[0]}</div>
-                                <h3 style={styles.patientName}>{p.name}</h3>
-                                <p style={styles.patientInfo}>{p.age && `${p.age}세`}</p>
-                                <p style={styles.patientInfo}>{p.address}</p>
+                    {/* 영상 */}
+                    <div className="relative aspect-video rounded-[28px] overflow-hidden bg-gray-100">
 
-                                {med ? (
-                                    <div style={styles.medSummary}>
-                                        <div style={styles.medSummaryTitle}>💊 오늘 복약</div>
-                                        <div style={styles.medBadgeRow}>
-                                            <div style={{ ...styles.medBadge, background: '#dcfce7', color: '#16a34a' }}>✅ {med.taken}</div>
-                                            <div style={{ ...styles.medBadge, background: '#fee2e2', color: '#dc2626' }}>❌ {med.missed}</div>
-                                            <div style={{ ...styles.medBadge, background: '#fef3c7', color: '#d97706' }}>⏳ {med.unconfirmed}</div>
-                                        </div>
-                                        <div style={styles.progressBar}>
-                                            <div style={{
-                                                ...styles.progressFill,
-                                                width: `${med.total > 0 ? (med.taken / med.total) * 100 : 0}%`,
-                                                background: med.missed > 0 ? '#f87171' : '#4ade80',
-                                            }} />
-                                        </div>
-                                        <div style={styles.progressText}>{med.taken}/{med.total} 완료</div>
-                                    </div>
-                                ) : (
-                                    <div style={styles.medEmpty}>💊 정보 없음</div>
-                                )}
+                        {isPrivacyMode ? (
 
-                                <div style={styles.cardButtons}>
-                                    <button style={styles.detailBtn} onClick={() => onSelectPatient(p)}>상세</button>
-                                    <button style={styles.deleteBtn} onClick={() => handleDelete(p.id)}>삭제</button>
-                                </div>
+                            <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-50/80 backdrop-blur-md">
+
+                                <Lock size={20} className="text-gray-300 mb-2"/>
+
+                                <button
+                                    onClick={() => setIsPrivacyMode(false)}
+                                    className="px-5 py-2 bg-blue-600 text-white rounded-full text-[11px] font-black border-none"
+                                >
+                                    화면 보기
+                                </button>
                             </div>
-                        );
-                    })}
+
+                        ) : (
+
+                            <div className="absolute inset-0 bg-gray-900 flex items-center justify-center">
+
+                                <span className="text-white/20 text-[10px] animate-pulse">
+                                    STREAMING LIVE...
+                                </span>
+
+                                <button
+                                    onClick={() => setIsPrivacyMode(true)}
+                                    className="absolute bottom-4 right-4 w-9 h-9 bg-black/30 text-white rounded-full flex items-center justify-center border-none"
+                                >
+                                    <Lock size={16}/>
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* 버튼 */}
+                    <div className="flex gap-2.5 mt-6">
+
+                        <button
+                            onClick={() => setShowSummary(true)}
+                            className="flex-[2.5] bg-blue-600 text-white py-4 rounded-2xl font-black text-sm border-none shadow-md active:scale-95"
+                        >
+                            상세 리포트 분석
+                        </button>
+
+                        <button
+                            onClick={() => setShowCallActions(true)}
+                            className="flex-1 bg-red-50 text-red-500 py-4 rounded-2xl font-black text-sm border-none active:scale-95"
+                        >
+                            호출
+                        </button>
+                    </div>
                 </div>
-
-                <div style={{ height: '72px' }} />
             </div>
 
-            {/* 하단 네비게이션 바 */}
-            <div style={styles.bottomNav}>
-                <button style={styles.navBtn} onClick={() => setActiveTab('home')}>
-                    <span style={styles.navIcon}>🏠</span>
-                    <span style={{ ...styles.navLabel, color: activeTab === 'home' ? '#2563eb' : '#6b7280' }}>홈</span>
-                </button>
-                <button style={styles.navBtn} onClick={() => { setActiveTab('notification'); onGoNotifications(); }}>
-                    <span style={styles.navIcon}>🔔</span>
-                    <span style={{ ...styles.navLabel, color: activeTab === 'notification' ? '#2563eb' : '#6b7280' }}>알림</span>
-                </button>
-                <button style={styles.navBtn} onClick={() => { setActiveTab('emergency'); if (patients.length > 0) onEmergency(patients[0]); }}>
-                    <span style={styles.navIcon}>🚨</span>
-                    <span style={{ ...styles.navLabel, color: activeTab === 'emergency' ? '#2563eb' : '#6b7280' }}>긴급</span>
-                </button>
-                <button style={styles.navBtn} onClick={() => { setActiveTab('mypage'); onLogout(); }}>
-                    <span style={styles.navIcon}>👤</span>
-                    <span style={{ ...styles.navLabel, color: activeTab === 'mypage' ? '#2563eb' : '#6b7280' }}>마이</span>
-                </button>
-            </div>
+            {/* 리포트 모달 */}
+            {showSummary && (
+
+                <div className="fixed inset-0 z-[100] flex flex-col justify-end">
+
+                    <div
+                        className="absolute inset-0 bg-black/50"
+                        onClick={() => setShowSummary(false)}
+                    />
+
+                    <div className="relative bg-white rounded-t-[40px] p-8 w-full">
+
+                        <h3 className="text-xl font-black mb-6">
+                            상황 분석 결과
+                        </h3>
+
+                        <div className="bg-blue-50 p-5 rounded-3xl flex gap-4">
+
+                            <Info className="text-blue-600"/>
+
+                            <p className="text-sm font-bold text-gray-800">
+                                현재 환자분은 거실에서 휴식 중인 것으로 분석됩니다.
+                            </p>
+                        </div>
+
+                        <button
+                            onClick={() => {
+                                setShowSummary(false);
+                                setShowPinModal(true);
+                            }}
+                            className="w-full mt-8 py-4 bg-gray-900 text-white rounded-2xl font-black border-none"
+                        >
+                            전체 히스토리 보기
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* 호출 모달 */}
+            {showCallActions && (
+
+                <div className="fixed inset-0 z-[110] flex flex-col justify-end">
+
+                    <div
+                        className="absolute inset-0 bg-black/50"
+                        onClick={() => setShowCallActions(false)}
+                    />
+
+                    <div className="relative bg-white rounded-t-[40px] p-8 w-full">
+
+                        <div className="flex items-center gap-3 mb-6">
+
+                            <div className="w-12 h-12 rounded-2xl bg-red-50 flex items-center justify-center">
+
+                                <AlertTriangle className="text-red-500"/>
+
+                            </div>
+
+                            <div>
+
+                                <h3 className="text-xl font-black">
+                                    긴급 호출
+                                </h3>
+
+                                <p className="text-xs text-gray-400 font-bold mt-1">
+                                    긴급 상황 시 빠르게 연락할 수 있습니다
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="space-y-3">
+
+                            <button className="w-full h-14 rounded-2xl bg-red-500 text-white font-black border-none flex items-center justify-center gap-2">
+
+                                <Phone size={18}/>
+
+                                119에 전화하기
+                            </button>
+
+                            <button className="w-full h-14 rounded-2xl bg-blue-600 text-white font-black border-none flex items-center justify-center gap-2">
+
+                                <Users size={18}/>
+
+                                다른 보호자에게 연락하기
+                            </button>
+
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* PIN 모달 */}
+            {showPinModal && (
+
+                <div className="fixed inset-0 z-[120] flex flex-col justify-end">
+
+                    <div
+                        className="absolute inset-0 bg-black/60"
+                        onClick={() => setShowPinModal(false)}
+                    />
+
+                    <div className="relative bg-white rounded-t-[40px] pt-8 pb-10 px-8 w-full">
+
+                        <div className="flex flex-col items-center mb-8">
+
+                            <div className="w-14 h-14 rounded-2xl bg-blue-50 flex items-center justify-center mb-4">
+
+                                <Lock size={22} className="text-blue-600"/>
+
+                            </div>
+
+                            <h3 className="text-lg font-black text-gray-900">
+                                보안 인증 필요
+                            </h3>
+
+                            <p className="text-center text-sm text-gray-400 font-bold mt-2 leading-relaxed">
+                                개인정보 보호를 위해
+                                <br/>
+                                히스토리 조회 전 비밀번호를 입력해주세요.
+                            </p>
+                        </div>
+
+                        <div className="flex justify-center gap-4 mb-10">
+
+                            {[0,1,2,3].map(i => (
+
+                                <div
+                                    key={i}
+                                    className={`w-4 h-4 rounded-full ${
+                                        i < pin.length
+                                            ? 'bg-blue-600'
+                                            : 'bg-gray-200'
+                                    }`}
+                                />
+                            ))}
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-3">
+
+                            {['1','2','3','4','5','6','7','8','9','','0','del']
+                                .map((k,i) => (
+
+                                    <button
+                                        key={i}
+                                        onClick={() =>
+                                            k === 'del'
+                                                ? setPin(pin.slice(0,-1))
+                                                : k && setPin(pin + k)
+                                        }
+                                        className="h-16 rounded-2xl bg-blue-50 text-blue-700 font-black text-xl border-none"
+                                    >
+                                        {k === 'del' ? '←' : k}
+                                    </button>
+                                ))}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
-
-const styles = {
-    pageWrapper: {
-        minHeight: '100vh',
-        background: '#f1f5f9',
-        maxWidth: '480px',
-        margin: '0 auto',
-        position: 'relative',
-        fontFamily: 'sans-serif',
-    },
-    scrollArea: { padding: '12px', paddingBottom: '0' },
-    header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' },
-    logo: { display: 'flex', alignItems: 'center', gap: '5px' },
-    logoImg: { height: '28px' },
-    logoText: { fontWeight: '700', color: '#2563eb', fontSize: '15px' },
-    emergencyBtn: {
-        background: '#dc2626', color: '#fff', border: 'none',
-        borderRadius: '7px', padding: '5px 10px', fontWeight: '600', cursor: 'pointer', fontSize: '12px',
-    },
-    topBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' },
-    title: { fontSize: '13px', fontWeight: '700', color: '#111' },
-    addBtn: {
-        padding: '5px 11px', background: '#2563eb', color: '#fff',
-        border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: '600',
-    },
-    formCard: {
-        background: '#fff', padding: '14px', borderRadius: '12px',
-        marginBottom: '10px', boxShadow: '0 4px 16px rgba(0,0,0,0.06)',
-    },
-    formTitle: { margin: '0 0 10px', fontSize: '13px', fontWeight: '700' },
-    form: { display: 'flex', flexDirection: 'column', gap: '7px' },
-    input: { padding: '8px 11px', borderRadius: '7px', border: '1px solid #ddd', fontSize: '13px', outline: 'none' },
-    cancelBtn: {
-        flex: 1, background: '#f3f4f6', border: 'none', padding: '10px',
-        borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '13px',
-    },
-    grid: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' },
-    card: {
-        background: '#fff', borderRadius: '12px', padding: '11px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.07)', textAlign: 'center',
-        display: 'flex', flexDirection: 'column', gap: '2px',
-    },
-    avatar: {
-        width: '38px', height: '38px', borderRadius: '50%',
-        background: colors.primary, color: '#fff',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        margin: '0 auto 5px', fontSize: '15px', fontWeight: '700',
-    },
-    patientName: { margin: '0 0 1px', fontSize: '13px', fontWeight: '700', color: '#111' },
-    patientInfo: { margin: 0, fontSize: '10px', color: '#6b7280' },
-    medSummary: {
-        background: '#f8faff', border: '1px solid #dbeafe',
-        borderRadius: '8px', padding: '6px', margin: '5px 0',
-    },
-    medSummaryTitle: { fontSize: '10px', fontWeight: '600', color: '#374151', marginBottom: '4px' },
-    medBadgeRow: { display: 'flex', gap: '2px', justifyContent: 'center', marginBottom: '4px' },
-    medBadge: { fontSize: '9px', fontWeight: '600', padding: '2px 4px', borderRadius: '20px' },
-    progressBar: { height: '4px', background: '#e5e7eb', borderRadius: '99px', overflow: 'hidden', marginBottom: '3px' },
-    progressFill: { height: '100%', borderRadius: '99px', transition: 'width 0.3s ease' },
-    progressText: { fontSize: '9px', color: '#6b7280' },
-    medEmpty: { fontSize: '10px', color: '#9ca3af', background: '#f9fafb', borderRadius: '6px', padding: '5px', margin: '5px 0' },
-    cardButtons: { display: 'flex', gap: '5px', marginTop: '4px' },
-    detailBtn: {
-        flex: 1, background: '#eff6ff', color: '#2563eb',
-        border: '1px solid #bfdbfe', borderRadius: '5px', padding: '5px 0', cursor: 'pointer', fontSize: '11px',
-    },
-    deleteBtn: {
-        flex: 1, background: '#fff', color: '#dc2626',
-        border: '1px solid #fecaca', borderRadius: '5px', padding: '5px 0', cursor: 'pointer', fontSize: '11px',
-    },
-    bottomNav: {
-        position: 'fixed',
-        bottom: 0,
-        left: '50%',
-        transform: 'translateX(-50%)',
-        width: '100%',
-        maxWidth: '480px',
-        background: '#fff',
-        borderTop: '1px solid #e5e7eb',
-        display: 'flex',
-        justifyContent: 'space-around',
-        alignItems: 'center',
-        padding: '6px 0 10px',
-        boxShadow: '0 -2px 12px rgba(0,0,0,0.08)',
-        zIndex: 100,
-    },
-    navBtn: {
-        display: 'flex', flexDirection: 'column', alignItems: 'center',
-        background: 'none', border: 'none', cursor: 'pointer',
-        padding: '4px 20px', gap: '2px',
-    },
-    navIcon: { fontSize: '20px' },
-    navLabel: { fontSize: '10px', fontWeight: '500' },
-};
