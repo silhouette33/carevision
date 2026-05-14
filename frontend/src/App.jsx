@@ -12,8 +12,8 @@ import { api } from './api/client';
 const NAV_ITEMS = [
     { id: 'dashboard', icon: Home, label: '홈' },
     { id: 'medication', icon: Pill, label: '복약' },
-    { id: 'notifications', icon: Bell, label: '알림' },
     { id: 'camera', icon: AlertTriangle, label: '응급' },
+    { id: 'notifications', icon: Bell, label: '알림' },
     { id: 'mypage', icon: User, label: '마이' },
 ];
 
